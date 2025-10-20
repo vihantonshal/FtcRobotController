@@ -79,6 +79,8 @@ public class StarterBotTeleopMecanums extends OpMode {
     private DcMotor rightFrontDrive = null;
     private DcMotor leftBackDrive = null;
     private DcMotor rightBackDrive = null;
+
+    private DcMotor intakeMotor = null;
     private DcMotorEx launcher = null;
     private CRServo leftFeeder = null;
     private CRServo rightFeeder = null;
@@ -221,28 +223,28 @@ public class StarterBotTeleopMecanums extends OpMode {
          * both motors work to rotate the robot. Combinations of these inputs can be used to create
          * more complex maneuvers.
          */
-        mecanumDrive(-gamepad1.left_stick_y, gamepad1.right_stick_x,gamepad1.left_stick_x);
+        mecanumDrive(-gamepad1.left_stick_y, gamepad1.left_stick_x,gamepad1.right_stick_x);
 
         /*
          * Here we give the user control of the speed of the launcher motor without automatically
          * queuing a shot.
          */
-//        if (gamepad1.y) {
-//            launcher.setVelocity(LAUNCHER_TARGET_VELOCITY);
-//        } else if (gamepad1.b) { // stop flywheel
-//            launcher.setVelocity(STOP_SPEED);
-//        }
+        if (gamepad2.y) {
+            launcher.setVelocity(LAUNCHER_TARGET_VELOCITY);
+        } else if (gamepad1.b) { // stop flywheel
+            launcher.setVelocity(STOP_SPEED);
+        }
 
         /*
          * Now we call our "Launch" function.
          */
-//        launch(gamepad1.rightBumperWasPressed());
+        launch(gamepad1.leftBumperWasPressed());
 
         /*
          * Show the state and motor powers
          */
-       //. telemetry.addData("State", launchState);
-        //telemetry.addData("motorSpeed", launcher.getVelocity());
+        telemetry.addData("State", launchState);
+        telemetry.addData("motorSpeed", launcher.getVelocity());
 
     }
 
@@ -285,7 +287,7 @@ public class StarterBotTeleopMecanums extends OpMode {
 
     }
 
-    /*
+
     void launch(boolean shotRequested) {
         switch (launchState) {
             case IDLE:
@@ -300,19 +302,19 @@ public class StarterBotTeleopMecanums extends OpMode {
                 }
                 break;
             case LAUNCH:
-                leftFeeder.setPower(FULL_SPEED);
-                rightFeeder.setPower(FULL_SPEED);
-                feederTimer.reset();
+//                leftFeeder.setPower(FULL_SPEED);
+//                rightFeeder.setPower(FULL_SPEED);
+//                feederTimer.reset();
                 launchState = LaunchState.LAUNCHING;
                 break;
             case LAUNCHING:
-                if (feederTimer.seconds() > FEED_TIME_SECONDS) {
+//                if (feederTimer.seconds() > FEED_TIME_SECONDS) {
                     launchState = LaunchState.IDLE;
-                    leftFeeder.setPower(STOP_SPEED);
-                    rightFeeder.setPower(STOP_SPEED);
-                }
+//                    leftFeeder.setPower(STOP_SPEED);
+//                    rightFeeder.setPower(STOP_SPEED);
+//                }
                 break;
         }
     }
-    */
+
 }
