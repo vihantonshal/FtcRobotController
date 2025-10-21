@@ -135,7 +135,9 @@ public class StarterBotTeleopMecanums extends OpMode {
         leftBackDrive = hardwareMap.get(DcMotor.class, "back_left_motor");
         rightBackDrive = hardwareMap.get(DcMotor.class, "back_right_motor");
 
-//        launcher = hardwareMap.get(DcMotorEx.class, "launcher");
+       launcher = hardwareMap.get(DcMotorEx.class, "launcher");
+
+        intakeMotor = hardwareMap.get(DcMotorEx.class, "intake");
 //        leftFeeder = hardwareMap.get(CRServo.class, "left_feeder");
 //        rightFeeder = hardwareMap.get(CRServo.class, "right_feeder");
 
@@ -158,7 +160,7 @@ public class StarterBotTeleopMecanums extends OpMode {
          * into the port right beside the motor itself. And that the motors polarity is consistent
          * through any wiring.
          */
-//        launcher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        launcher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
 
         /*
          * Setting zeroPowerBehavior to BRAKE enables a "brake mode". This causes the motor to
@@ -169,7 +171,7 @@ public class StarterBotTeleopMecanums extends OpMode {
         rightFrontDrive.setZeroPowerBehavior(BRAKE);
         leftBackDrive.setZeroPowerBehavior(BRAKE);
         rightBackDrive.setZeroPowerBehavior(BRAKE);
-//        launcher.setZeroPowerBehavior(BRAKE);
+       launcher.setZeroPowerBehavior(BRAKE);
 
         /*
          * set Feeders to an initial value to initialize the servo controller
@@ -177,7 +179,7 @@ public class StarterBotTeleopMecanums extends OpMode {
 //        leftFeeder.setPower(STOP_SPEED);
 //        rightFeeder.setPower(STOP_SPEED);
 //
-//        launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(300, 0, 0, 10));
+//    launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(300, 0, 0, 10));
 
         /*
          * Much like our drivetrain motors, we set the left feeder servo to reverse so that they
@@ -231,7 +233,7 @@ public class StarterBotTeleopMecanums extends OpMode {
          */
         if (gamepad2.y) {
             launcher.setVelocity(LAUNCHER_TARGET_VELOCITY);
-        } else if (gamepad1.b) { // stop flywheel
+        } else if (gamepad2.b) { // stop flywheel
             launcher.setVelocity(STOP_SPEED);
         }
 
