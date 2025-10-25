@@ -41,7 +41,6 @@ import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.PIDFCoefficients;
-import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
 /*
@@ -62,7 +61,7 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 @TeleOp(name = "StarterBotTeleopMecanums", group = "StarterBot")
 //@Disabled
 public class StarterBotTeleopMecanums extends OpMode {
-    final double FEED_TIME_SECONDS = 5.0; //The feeder servos run this long when a shot is requested.
+    final double FEED_TIME_SECONDS = 0.20; //The feeder servos run this long when a shot is requested.
     final double STOP_SPEED = 0.0; //We send this power to the servos when we want them to stop.
     final double FULL_SPEED = 1.0;
 
@@ -75,18 +74,15 @@ public class StarterBotTeleopMecanums extends OpMode {
     final double LAUNCHER_TARGET_VELOCITY = 1125;
     final double LAUNCHER_MIN_VELOCITY = 1075;
 
-
-    final double INTAKE_TARGET_VELOCITY = 1125;
     // Declare OpMode members.
     private DcMotor leftFrontDrive = null;
     private DcMotor rightFrontDrive = null;
     private DcMotor leftBackDrive = null;
     private DcMotor rightBackDrive = null;
-
-    private DcMotorEx intakeMotor = null;
     private DcMotorEx launcher = null;
     private CRServo leftFeeder = null;
     private CRServo rightFeeder = null;
+    private DcMotor intakeMotor = null;
 
     ElapsedTime feederTimer = new ElapsedTime();
 
@@ -133,17 +129,18 @@ public class StarterBotTeleopMecanums extends OpMode {
          * to 'get' must correspond to the names assigned during the robot configuration
          * step.
          */
-        leftFrontDrive = hardwareMap.get(DcMotor.class, "front_left_motor");
-        rightFrontDrive = hardwareMap.get(DcMotor.class, "front_right_motor");
-        leftBackDrive = hardwareMap.get(DcMotor.class, "back_left_motor");
-        rightBackDrive = hardwareMap.get(DcMotor.class, "back_right_motor");
+//        leftFrontDrive = hardwareMap.get(DcMotor.class, "front_left_motor");
+//        rightFrontDrive = hardwareMap.get(DcMotor.class, "front_right_motor");
+//        leftBackDrive = hardwareMap.get(DcMotor.class, "back_left_motor");
+//        rightBackDrive = hardwareMap.get(DcMotor.class, "back_right_motor");
+        leftFrontDrive = hardwareMap.get(DcMotor.class, "frontLeft");
+        rightFrontDrive = hardwareMap.get(DcMotor.class, "frontRight");
+        leftBackDrive = hardwareMap.get(DcMotor.class, "backLeft");
+        rightBackDrive = hardwareMap.get(DcMotor.class, "backRight");
 
-       launcher = hardwareMap.get(DcMotorEx.class, "launcher");
-
-        intakeMotor = hardwareMap.get(DcMotorEx.class, "intake");
-
-        leftFeeder = hardwareMap.get(CRServo.class, "left_feeder");
-        rightFeeder = hardwareMap.get(CRServo.class, "right_feeder");
+//        launcher = hardwareMap.get(DcMotorEx.class, "launcher");
+//        leftFeeder = hardwareMap.get(CRServo.class, "left_feeder");
+//        rightFeeder = hardwareMap.get(CRServo.class, "right_feeder");
 
         /*
          * To drive forward, most robots need the motor on one side to be reversed,
@@ -157,14 +154,6 @@ public class StarterBotTeleopMecanums extends OpMode {
         leftBackDrive.setDirection(DcMotor.Direction.REVERSE);
         rightBackDrive.setDirection(DcMotor.Direction.FORWARD);
 
-     //We are reversing the intake motor, because the motor and gear are configured in a way that causes the motors to spin in the opposite way.
-        intakeMotor.setDirection(DcMotorSimple.Direction.REVERSE);
-
-
-        leftFeeder.setDirection(CRServo.Direction.FORWARD);
-        rightFeeder.setDirection(CRServo.Direction.REVERSE);
-
-
         /*
          * Here we set our launcher to the RUN_USING_ENCODER runmode.
          * If you notice that you have no control over the velocity of the motor, it just jumps
@@ -172,9 +161,8 @@ public class StarterBotTeleopMecanums extends OpMode {
          * into the port right beside the motor itself. And that the motors polarity is consistent
          * through any wiring.
          */
-        launcher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+//        launcher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
 
-        intakeMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
         /*
          * Setting zeroPowerBehavior to BRAKE enables a "brake mode". This causes the motor to
          * slow down much faster when it is coasting. This creates a much more controllable
@@ -184,15 +172,15 @@ public class StarterBotTeleopMecanums extends OpMode {
         rightFrontDrive.setZeroPowerBehavior(BRAKE);
         leftBackDrive.setZeroPowerBehavior(BRAKE);
         rightBackDrive.setZeroPowerBehavior(BRAKE);
-       launcher.setZeroPowerBehavior(BRAKE);
-        intakeMotor.setZeroPowerBehavior(BRAKE);
+//        launcher.setZeroPowerBehavior(BRAKE);
+
         /*
          * set Feeders to an initial value to initialize the servo controller
          */
-        leftFeeder.setPower(STOP_SPEED);
-        rightFeeder.setPower(STOP_SPEED);
+//        leftFeeder.setPower(STOP_SPEED);
+//        rightFeeder.setPower(STOP_SPEED);
 //
-//    launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(300, 0, 0, 10));
+    launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(300, 0, 0, 10));
 
         /*
          * Much like our drivetrain motors, we set the left feeder servo to reverse so that they
@@ -222,6 +210,9 @@ public class StarterBotTeleopMecanums extends OpMode {
      */
     @Override
     public void start() {
+        telemetry.addData("Status", "We are in the start");
+
+
     }
 
     /*
@@ -246,26 +237,20 @@ public class StarterBotTeleopMecanums extends OpMode {
          */
         if (gamepad2.y) {
             launcher.setVelocity(LAUNCHER_TARGET_VELOCITY);
-        } else if (gamepad2.b) { // stop flywheel
+        } else if (gamepad2 .b) { // stop flywheel
             launcher.setVelocity(STOP_SPEED);
         }
 
-
-        if (gamepad2.x) {
-            intakeMotor.setVelocity(INTAKE_TARGET_VELOCITY);
-        } else if (gamepad2.a) { // stop flywheel
-            intakeMotor.setVelocity(STOP_SPEED);
-        }
         /*
          * Now we call our "Launch" function.
          */
-        launch(gamepad2.leftBumperWasPressed());
+       launch(gamepad1.leftBumperWasPressed());
 
         /*
          * Show the state and motor powers
          */
-        telemetry.addData("State", launchState);
-        telemetry.addData("motorSpeed", launcher.getVelocity());
+       //. telemetry.addData("State", launchState);
+        //telemetry.addData("motorSpeed", launcher.getVelocity());
 
     }
 
@@ -315,35 +300,26 @@ public class StarterBotTeleopMecanums extends OpMode {
                 if (shotRequested) {
                     launchState = LaunchState.SPIN_UP;
                 }
-                telemetry.addData("State","idle");
                 break;
             case SPIN_UP:
                 launcher.setVelocity(LAUNCHER_TARGET_VELOCITY);
                 if (launcher.getVelocity() > LAUNCHER_MIN_VELOCITY) {
                     launchState = LaunchState.LAUNCH;
                 }
-                telemetry.addData("State","spin_up");
-
                 break;
             case LAUNCH:
-                leftFeeder.setPower(FULL_SPEED);
-                rightFeeder.setPower(FULL_SPEED);
-                feederTimer.reset();
+//                leftFeeder.setPower(FULL_SPEED);
+//                rightFeeder.setPower(FULL_SPEED);
+//                feederTimer.reset();
                 launchState = LaunchState.LAUNCHING;
-
-                telemetry.addData("State","launch");
-
                 break;
             case LAUNCHING:
                 if (feederTimer.seconds() > FEED_TIME_SECONDS) {
                     launchState = LaunchState.IDLE;
-                    leftFeeder.setPower(STOP_SPEED);
-                    rightFeeder.setPower(STOP_SPEED);
+//                    leftFeeder.setPower(STOP_SPEED);
+//                    rightFeeder.setPower(STOP_SPEED);
                 }
-                telemetry.addData("State","launching");
-
                 break;
-
         }
     }
 
