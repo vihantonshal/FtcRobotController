@@ -77,7 +77,7 @@ public class MecanumDrive {
         RevHubOrientationOnRobot.LogoFacingDirection logoDirection =
                 RevHubOrientationOnRobot.LogoFacingDirection.UP;
         RevHubOrientationOnRobot.UsbFacingDirection usbDirection =
-                RevHubOrientationOnRobot.UsbFacingDirection.RIGHT;
+                RevHubOrientationOnRobot.UsbFacingDirection.FORWARD;
 
         RevHubOrientationOnRobot orientationOnRobot = new
                 RevHubOrientationOnRobot(logoDirection, usbDirection);

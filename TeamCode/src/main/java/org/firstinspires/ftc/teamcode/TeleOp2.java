@@ -34,7 +34,7 @@ public class TeleOp2 extends LinearOpMode {
                 if (gamepad1.left_bumper) {
                     MCDrive.drive(-gamepad1.left_stick_y, gamepad1.left_stick_x, gamepad1.right_stick_x);
                 } else {
-                  //  MCDrive.driveFieldRelative(-gamepad1.left_stick_y, gamepad1.left_stick_x, gamepad1.right_stick_x);
+                    MCDrive.driveFieldRelative(-gamepad1.left_stick_y, gamepad1.left_stick_x, gamepad1.right_stick_x);
 
 
                 }
