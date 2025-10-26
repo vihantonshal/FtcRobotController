@@ -172,9 +172,9 @@ public class StarterBotTeleopMecanums extends OpMode {
          * into the port right beside the motor itself. And that the motors polarity is consistent
          * through any wiring.
          */
-        launcher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        launcher.setMode(DcMotorEx.RunMode.RUN_USING_ENCODER);
 
-        intakeMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        intakeMotor.setMode(DcMotorEx.RunMode.RUN_USING_ENCODER);
         /*
          * Setting zeroPowerBehavior to BRAKE enables a "brake mode". This causes the motor to
          * slow down much faster when it is coasting. This creates a much more controllable
@@ -256,6 +256,11 @@ public class StarterBotTeleopMecanums extends OpMode {
         } else if (gamepad2.a) { // stop flywheel
             intakeMotor.setVelocity(STOP_SPEED);
         }
+
+        if (gamepad1.b) {
+            strafe_right();
+        }
+
         /*
          * Now we call our "Launch" function.
          */
@@ -276,35 +281,102 @@ public class StarterBotTeleopMecanums extends OpMode {
     public void stop() {
     }
 
-    void mecanumDrive(double forward, double strafe, double rotate){
+//
+//   void mecanumDrive(double forward, double strafe, double rotate){
+//
+//
+//
+//       final double MAX_SPEED_FACTOR = 0.5; // Max power robot can reach (e.g., 0.8 for 80%)
+//       final double POWER_SMOOTHING_EXPONENT = 3.0; // 1.0 is linear, 3.0 is cubic (more sensitive to small inputs)
+//
+//       // 2. Apply Smoothing (Non-Linear Power Curve)
+//       // Uses the formula: sign(x) * |x|^P, where P is the exponent.
+//       // This gives finer control at low speeds.
+//       double f = Math.copySign(Math.pow(forward, POWER_SMOOTHING_EXPONENT), forward);
+//       double s = Math.copySign(Math.pow(strafe, POWER_SMOOTHING_EXPONENT), strafe);
+//       double r = Math.copySign(Math.pow(rotate, POWER_SMOOTHING_EXPONENT), rotate);
+//
+//       /* the denominator is the largest motor power (absolute value) or 1
+//        * This ensures all the powers maintain the same ratio,
+//        * but only if at least one is out of the range [-1, 1]
+//        */
+//        double denominator = Math.max(Math.abs(f) + Math.abs(s) + Math.abs(r), 1);
+//
+//        leftFrontPower = (f + s + r) / denominator;
+//        rightFrontPower = (f - s - r) / denominator;
+//        leftBackPower = (f - s + r) / denominator;
+//        rightBackPower = (f + s - r) / denominator;
+//
+//        leftFrontDrive.setPower(leftFrontPower);
+//        rightFrontDrive.setPower(rightFrontPower);
+//        leftBackDrive.setPower(leftBackPower);
+//        rightBackDrive.setPower(rightBackPower);
+//
+//    }
 
+    // AI Helped
+    void mecanumDrive(double forward, double strafe, double rotate) {
 
+        // --- Configuration Constants ---
+        // Max power robot can reach (e.g., 0.8 for 80% of full speed)
+        final double MAX_SPEED_FACTOR = 0.5;
+        // Power Smoothing Exponent: 1.0 is linear, 3.0 is cubic (more sensitive to small inputs)
+        final double POWER_SMOOTHING_EXPONENT = 3.0;
 
-        final double MAX_SPEED_FACTOR = 0.5; // Max power robot can reach (e.g., 0.8 for 80%)
-        final double POWER_SMOOTHING_EXPONENT = 3.0; // 1.0 is linear, 3.0 is cubic (more sensitive to small inputs)
+        // --- 1. Apply Smoothing (Non-Linear Power Curve) ---
+        // Uses the formula: sign(x) * |x|^P, which gives finer control at low speeds.
+        double f = Math.copySign(Math.pow(Math.abs(forward), POWER_SMOOTHING_EXPONENT), forward);
+        double s = Math.copySign(Math.pow(Math.abs(strafe), POWER_SMOOTHING_EXPONENT), strafe);
+        double r = Math.copySign(Math.pow(Math.abs(rotate), POWER_SMOOTHING_EXPONENT), rotate);
 
-        // 2. Apply Smoothing (Non-Linear Power Curve)
-        // Uses the formula: sign(x) * |x|^P, where P is the exponent.
-        // This gives finer control at low speeds.
-        double f = Math.copySign(Math.pow(forward, POWER_SMOOTHING_EXPONENT), forward);
-        double s = Math.copySign(Math.pow(strafe, POWER_SMOOTHING_EXPONENT), strafe);
-        double r = Math.copySign(Math.pow(rotate, POWER_SMOOTHING_EXPONENT), rotate);
-
-        /* the denominator is the largest motor power (absolute value) or 1
-         * This ensures all the powers maintain the same ratio,
-         * but only if at least one is out of the range [-1, 1]
+        // --- 2. Calculate Raw Motor Powers (Mecanum Kinematics) ---
+        /* The signs for 's' are crucial. The standard set is (+s, -s, -s, +s).
+         * If strafing is reversed, change all 's' signs.
+         * e.g., for LeftFront use (f - s + r) instead of (f + s + r)
          */
-        double denominator = Math.max(Math.abs(f) + Math.abs(s) + Math.abs(r), 1);
 
-        leftFrontPower = (f + s + r) / denominator;
-        rightFrontPower = (f - s - r) / denominator;
-        leftBackPower = (f - s + r) / denominator;
-        rightBackPower = (f + s - r) / denominator;
+        double leftFrontRawPower = f + s + r;
+        double rightFrontRawPower = f - s - r;
+        double leftBackRawPower = f - s + r;
+        double rightBackRawPower = f + s - r;
 
+
+//        // Option B: Use this if strafing is reversed with the standard signs.
+//        double leftFrontRawPower = f - s + r; // <-- s sign inverted
+//        double rightFrontRawPower = f + s - r; // <-- s sign inverted
+//        double leftBackRawPower = f + s + r; // <-- s sign inverted
+//        double rightBackRawPower = f - s - r; // <-- s sign inverted
+
+        // --- 3. Normalization (Scaling) ---
+        /* Denominator is the largest absolute power required across all motors, or 1.
+         * This ensures no power value exceeds 1.0 *before* the MAX_SPEED_FACTOR is applied.
+         */
+        double maxMagnitude = Math.max(
+                Math.abs(leftFrontRawPower),
+                Math.max(
+                        Math.abs(rightFrontRawPower),
+                        Math.max(Math.abs(leftBackRawPower), Math.abs(rightBackRawPower))
+                )
+        );
+        // Use Math.max(maxMagnitude, 1) to prevent division by a number less than 1,
+        // which would unnecessarily scale up small powers (though power smoothing makes this less likely)
+        double denominator = Math.max(maxMagnitude, 1.0);
+
+        // --- 4. Final Power Calculation and Limiting ---
+
+        // Calculate final power and scale by the MAX_SPEED_FACTOR
+        leftFrontPower = (leftFrontRawPower / denominator) * MAX_SPEED_FACTOR;
+        rightFrontPower = (rightFrontRawPower / denominator) * MAX_SPEED_FACTOR;
+        leftBackPower = (leftBackRawPower / denominator) * MAX_SPEED_FACTOR;
+        rightBackPower = (rightBackRawPower / denominator) * MAX_SPEED_FACTOR;
+
+        // --- 5. Set Motor Powers ---
         leftFrontDrive.setPower(leftFrontPower);
         rightFrontDrive.setPower(rightFrontPower);
         leftBackDrive.setPower(leftBackPower);
         rightBackDrive.setPower(rightBackPower);
+
+
 
     }
 
@@ -345,6 +417,17 @@ public class StarterBotTeleopMecanums extends OpMode {
                 break;
 
         }
+    }
+
+    void strafe_right()
+    {
+
+        leftFrontDrive.setPower(1.0);
+        rightFrontDrive.setPower(-1.0);
+        leftBackDrive.setPower(-1.0);
+        rightBackDrive.setPower(1.0);
+
+
     }
 
 }
