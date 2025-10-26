@@ -41,6 +41,7 @@ import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.PIDFCoefficients;
+import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
 /*
@@ -61,7 +62,7 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 @TeleOp(name = "StarterBotTeleopMecanums", group = "StarterBot")
 //@Disabled
 public class StarterBotTeleopMecanums extends OpMode {
-    final double FEED_TIME_SECONDS = 0.20; //The feeder servos run this long when a shot is requested.
+    final double FEED_TIME_SECONDS = 5.0; //The feeder servos run this long when a shot is requested.
     final double STOP_SPEED = 0.0; //We send this power to the servos when we want them to stop.
     final double FULL_SPEED = 1.0;
 
@@ -74,15 +75,18 @@ public class StarterBotTeleopMecanums extends OpMode {
     final double LAUNCHER_TARGET_VELOCITY = 1125;
     final double LAUNCHER_MIN_VELOCITY = 1075;
 
+
+    final double INTAKE_TARGET_VELOCITY = 1125;
     // Declare OpMode members.
     private DcMotor leftFrontDrive = null;
     private DcMotor rightFrontDrive = null;
     private DcMotor leftBackDrive = null;
     private DcMotor rightBackDrive = null;
+
+    private DcMotorEx intakeMotor = null;
     private DcMotorEx launcher = null;
     private CRServo leftFeeder = null;
     private CRServo rightFeeder = null;
-    private DcMotor intakeMotor = null;
 
     ElapsedTime feederTimer = new ElapsedTime();
 
@@ -129,18 +133,17 @@ public class StarterBotTeleopMecanums extends OpMode {
          * to 'get' must correspond to the names assigned during the robot configuration
          * step.
          */
-//        leftFrontDrive = hardwareMap.get(DcMotor.class, "front_left_motor");
-//        rightFrontDrive = hardwareMap.get(DcMotor.class, "front_right_motor");
-//        leftBackDrive = hardwareMap.get(DcMotor.class, "back_left_motor");
-//        rightBackDrive = hardwareMap.get(DcMotor.class, "back_right_motor");
-        leftFrontDrive = hardwareMap.get(DcMotor.class, "frontLeft");
-        rightFrontDrive = hardwareMap.get(DcMotor.class, "frontRight");
-        leftBackDrive = hardwareMap.get(DcMotor.class, "backLeft");
-        rightBackDrive = hardwareMap.get(DcMotor.class, "backRight");
+        leftFrontDrive = hardwareMap.get(DcMotor.class, "front_left_motor");
+        rightFrontDrive = hardwareMap.get(DcMotor.class, "front_right_motor");
+        leftBackDrive = hardwareMap.get(DcMotor.class, "back_left_motor");
+        rightBackDrive = hardwareMap.get(DcMotor.class, "back_right_motor");
 
-//        launcher = hardwareMap.get(DcMotorEx.class, "launcher");
-//        leftFeeder = hardwareMap.get(CRServo.class, "left_feeder");
-//        rightFeeder = hardwareMap.get(CRServo.class, "right_feeder");
+       launcher = hardwareMap.get(DcMotorEx.class, "launcher");
+
+        intakeMotor = hardwareMap.get(DcMotorEx.class, "intake");
+
+        leftFeeder = hardwareMap.get(CRServo.class, "left_feeder");
+        rightFeeder = hardwareMap.get(CRServo.class, "right_feeder");
 
         /*
          * To drive forward, most robots need the motor on one side to be reversed,
@@ -154,6 +157,14 @@ public class StarterBotTeleopMecanums extends OpMode {
         leftBackDrive.setDirection(DcMotor.Direction.REVERSE);
         rightBackDrive.setDirection(DcMotor.Direction.FORWARD);
 
+     //We are reversing the intake motor, because the motor and gear are configured in a way that causes the motors to spin in the opposite way.
+        intakeMotor.setDirection(DcMotorSimple.Direction.REVERSE);
+
+
+        leftFeeder.setDirection(CRServo.Direction.FORWARD);
+        rightFeeder.setDirection(CRServo.Direction.REVERSE);
+
+
         /*
          * Here we set our launcher to the RUN_USING_ENCODER runmode.
          * If you notice that you have no control over the velocity of the motor, it just jumps
@@ -161,8 +172,9 @@ public class StarterBotTeleopMecanums extends OpMode {
          * into the port right beside the motor itself. And that the motors polarity is consistent
          * through any wiring.
          */
-//        launcher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        launcher.setMode(DcMotorEx.RunMode.RUN_USING_ENCODER);
 
+        intakeMotor.setMode(DcMotorEx.RunMode.RUN_USING_ENCODER);
         /*
          * Setting zeroPowerBehavior to BRAKE enables a "brake mode". This causes the motor to
          * slow down much faster when it is coasting. This creates a much more controllable
@@ -172,15 +184,15 @@ public class StarterBotTeleopMecanums extends OpMode {
         rightFrontDrive.setZeroPowerBehavior(BRAKE);
         leftBackDrive.setZeroPowerBehavior(BRAKE);
         rightBackDrive.setZeroPowerBehavior(BRAKE);
-//        launcher.setZeroPowerBehavior(BRAKE);
-
+       launcher.setZeroPowerBehavior(BRAKE);
+        intakeMotor.setZeroPowerBehavior(BRAKE);
         /*
          * set Feeders to an initial value to initialize the servo controller
          */
-//        leftFeeder.setPower(STOP_SPEED);
-//        rightFeeder.setPower(STOP_SPEED);
+        leftFeeder.setPower(STOP_SPEED);
+        rightFeeder.setPower(STOP_SPEED);
 //
-    launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(300, 0, 0, 10));
+//    launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(300, 0, 0, 10));
 
         /*
          * Much like our drivetrain motors, we set the left feeder servo to reverse so that they
@@ -210,9 +222,6 @@ public class StarterBotTeleopMecanums extends OpMode {
      */
     @Override
     public void start() {
-        telemetry.addData("Status", "We are in the start");
-
-
     }
 
     /*
@@ -237,20 +246,31 @@ public class StarterBotTeleopMecanums extends OpMode {
          */
         if (gamepad2.y) {
             launcher.setVelocity(LAUNCHER_TARGET_VELOCITY);
-        } else if (gamepad2 .b) { // stop flywheel
+        } else if (gamepad2.b) { // stop flywheel
             launcher.setVelocity(STOP_SPEED);
+        }
+
+
+        if (gamepad2.x) {
+            intakeMotor.setVelocity(INTAKE_TARGET_VELOCITY);
+        } else if (gamepad2.a) { // stop flywheel
+            intakeMotor.setVelocity(STOP_SPEED);
+        }
+
+        if (gamepad1.b) {
+            strafe_right();
         }
 
         /*
          * Now we call our "Launch" function.
          */
-       launch(gamepad1.leftBumperWasPressed());
+        launch(gamepad2.leftBumperWasPressed());
 
         /*
          * Show the state and motor powers
          */
-       //. telemetry.addData("State", launchState);
-        //telemetry.addData("motorSpeed", launcher.getVelocity());
+        telemetry.addData("State", launchState);
+        telemetry.addData("motorSpeed", launcher.getVelocity());
 
     }
 
@@ -261,35 +281,102 @@ public class StarterBotTeleopMecanums extends OpMode {
     public void stop() {
     }
 
-    void mecanumDrive(double forward, double strafe, double rotate){
+//
+//   void mecanumDrive(double forward, double strafe, double rotate){
+//
+//
+//
+//       final double MAX_SPEED_FACTOR = 0.5; // Max power robot can reach (e.g., 0.8 for 80%)
+//       final double POWER_SMOOTHING_EXPONENT = 3.0; // 1.0 is linear, 3.0 is cubic (more sensitive to small inputs)
+//
+//       // 2. Apply Smoothing (Non-Linear Power Curve)
+//       // Uses the formula: sign(x) * |x|^P, where P is the exponent.
+//       // This gives finer control at low speeds.
+//       double f = Math.copySign(Math.pow(forward, POWER_SMOOTHING_EXPONENT), forward);
+//       double s = Math.copySign(Math.pow(strafe, POWER_SMOOTHING_EXPONENT), strafe);
+//       double r = Math.copySign(Math.pow(rotate, POWER_SMOOTHING_EXPONENT), rotate);
+//
+//       /* the denominator is the largest motor power (absolute value) or 1
+//        * This ensures all the powers maintain the same ratio,
+//        * but only if at least one is out of the range [-1, 1]
+//        */
+//        double denominator = Math.max(Math.abs(f) + Math.abs(s) + Math.abs(r), 1);
+//
+//        leftFrontPower = (f + s + r) / denominator;
+//        rightFrontPower = (f - s - r) / denominator;
+//        leftBackPower = (f - s + r) / denominator;
+//        rightBackPower = (f + s - r) / denominator;
+//
+//        leftFrontDrive.setPower(leftFrontPower);
+//        rightFrontDrive.setPower(rightFrontPower);
+//        leftBackDrive.setPower(leftBackPower);
+//        rightBackDrive.setPower(rightBackPower);
+//
+//    }
 
+    // AI Helped
+    void mecanumDrive(double forward, double strafe, double rotate) {
 
+        // --- Configuration Constants ---
+        // Max power robot can reach (e.g., 0.8 for 80% of full speed)
+        final double MAX_SPEED_FACTOR = 0.5;
+        // Power Smoothing Exponent: 1.0 is linear, 3.0 is cubic (more sensitive to small inputs)
+        final double POWER_SMOOTHING_EXPONENT = 3.0;
 
-        final double MAX_SPEED_FACTOR = 0.5; // Max power robot can reach (e.g., 0.8 for 80%)
-        final double POWER_SMOOTHING_EXPONENT = 3.0; // 1.0 is linear, 3.0 is cubic (more sensitive to small inputs)
+        // --- 1. Apply Smoothing (Non-Linear Power Curve) ---
+        // Uses the formula: sign(x) * |x|^P, which gives finer control at low speeds.
+        double f = Math.copySign(Math.pow(Math.abs(forward), POWER_SMOOTHING_EXPONENT), forward);
+        double s = Math.copySign(Math.pow(Math.abs(strafe), POWER_SMOOTHING_EXPONENT), strafe);
+        double r = Math.copySign(Math.pow(Math.abs(rotate), POWER_SMOOTHING_EXPONENT), rotate);
 
-        // 2. Apply Smoothing (Non-Linear Power Curve)
-        // Uses the formula: sign(x) * |x|^P, where P is the exponent.
-        // This gives finer control at low speeds.
-        double f = Math.copySign(Math.pow(forward, POWER_SMOOTHING_EXPONENT), forward);
-        double s = Math.copySign(Math.pow(strafe, POWER_SMOOTHING_EXPONENT), strafe);
-        double r = Math.copySign(Math.pow(rotate, POWER_SMOOTHING_EXPONENT), rotate);
-
-        /* the denominator is the largest motor power (absolute value) or 1
-         * This ensures all the powers maintain the same ratio,
-         * but only if at least one is out of the range [-1, 1]
+        // --- 2. Calculate Raw Motor Powers (Mecanum Kinematics) ---
+        /* The signs for 's' are crucial. The standard set is (+s, -s, -s, +s).
+         * If strafing is reversed, change all 's' signs.
+         * e.g., for LeftFront use (f - s + r) instead of (f + s + r)
          */
-        double denominator = Math.max(Math.abs(f) + Math.abs(s) + Math.abs(r), 1);
 
-        leftFrontPower = (f + s + r) / denominator;
-        rightFrontPower = (f - s - r) / denominator;
-        leftBackPower = (f - s + r) / denominator;
-        rightBackPower = (f + s - r) / denominator;
+        double leftFrontRawPower = f + s + r;
+        double rightFrontRawPower = f - s - r;
+        double leftBackRawPower = f - s + r;
+        double rightBackRawPower = f + s - r;
 
+
+//        // Option B: Use this if strafing is reversed with the standard signs.
+//        double leftFrontRawPower = f - s + r; // <-- s sign inverted
+//        double rightFrontRawPower = f + s - r; // <-- s sign inverted
+//        double leftBackRawPower = f + s + r; // <-- s sign inverted
+//        double rightBackRawPower = f - s - r; // <-- s sign inverted
+
+        // --- 3. Normalization (Scaling) ---
+        /* Denominator is the largest absolute power required across all motors, or 1.
+         * This ensures no power value exceeds 1.0 *before* the MAX_SPEED_FACTOR is applied.
+         */
+        double maxMagnitude = Math.max(
+                Math.abs(leftFrontRawPower),
+                Math.max(
+                        Math.abs(rightFrontRawPower),
+                        Math.max(Math.abs(leftBackRawPower), Math.abs(rightBackRawPower))
+                )
+        );
+        // Use Math.max(maxMagnitude, 1) to prevent division by a number less than 1,
+        // which would unnecessarily scale up small powers (though power smoothing makes this less likely)
+        double denominator = Math.max(maxMagnitude, 1.0);
+
+        // --- 4. Final Power Calculation and Limiting ---
+
+        // Calculate final power and scale by the MAX_SPEED_FACTOR
+        leftFrontPower = (leftFrontRawPower / denominator) * MAX_SPEED_FACTOR;
+        rightFrontPower = (rightFrontRawPower / denominator) * MAX_SPEED_FACTOR;
+        leftBackPower = (leftBackRawPower / denominator) * MAX_SPEED_FACTOR;
+        rightBackPower = (rightBackRawPower / denominator) * MAX_SPEED_FACTOR;
+
+        // --- 5. Set Motor Powers ---
         leftFrontDrive.setPower(leftFrontPower);
         rightFrontDrive.setPower(rightFrontPower);
         leftBackDrive.setPower(leftBackPower);
         rightBackDrive.setPower(rightBackPower);
+
+
 
     }
 
@@ -300,27 +387,47 @@ public class StarterBotTeleopMecanums extends OpMode {
                 if (shotRequested) {
                     launchState = LaunchState.SPIN_UP;
                 }
+                telemetry.addData("State","idle");
                 break;
             case SPIN_UP:
                 launcher.setVelocity(LAUNCHER_TARGET_VELOCITY);
                 if (launcher.getVelocity() > LAUNCHER_MIN_VELOCITY) {
                     launchState = LaunchState.LAUNCH;
                 }
+                telemetry.addData("State","spin_up");
+
                 break;
             case LAUNCH:
-//                leftFeeder.setPower(FULL_SPEED);
-//                rightFeeder.setPower(FULL_SPEED);
-//                feederTimer.reset();
+                leftFeeder.setPower(FULL_SPEED);
+                rightFeeder.setPower(FULL_SPEED);
+                feederTimer.reset();
                 launchState = LaunchState.LAUNCHING;
+
+                telemetry.addData("State","launch");
+
                 break;
             case LAUNCHING:
                 if (feederTimer.seconds() > FEED_TIME_SECONDS) {
                     launchState = LaunchState.IDLE;
-//                    leftFeeder.setPower(STOP_SPEED);
-//                    rightFeeder.setPower(STOP_SPEED);
+                    leftFeeder.setPower(STOP_SPEED);
+                    rightFeeder.setPower(STOP_SPEED);
                 }
+                telemetry.addData("State","launching");
+
                 break;
+
         }
+    }
+
+    void strafe_right()
+    {
+
+        leftFrontDrive.setPower(1.0);
+        rightFrontDrive.setPower(-1.0);
+        leftBackDrive.setPower(-1.0);
+        rightBackDrive.setPower(1.0);
+
+
     }
 
 }
