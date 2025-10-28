@@ -75,8 +75,9 @@ public class StarterBotAuto extends OpMode
      * velocity. Here we are setting the target and minimum velocity that the launcher should run
      * at. The minimum velocity is a threshold for determining when to fire.
      */
-    final double LAUNCHER_TARGET_VELOCITY = 1125;
+    final double LAUNCHER_TARGET_VELOCITY = 1125*1.2;
     final double LAUNCHER_MIN_VELOCITY = 1075;
+    final double INTAKE_TARGET_VELOCITY = 1125;
 
     /*
      * The number of seconds that we wait between each of our 3 shots from the launcher. This
@@ -84,7 +85,7 @@ public class StarterBotAuto extends OpMode
      * that each shot will score.
      */
     final double TIME_BETWEEN_SHOTS = 2;
-
+    final double STOP_SPEED = 0.0;
     /*
      * Here we capture a few variables used in driving the robot. DRIVE_SPEED and ROTATE_SPEED
      * are from 0-1, with 1 being full speed. Encoder ticks per revolution is specific to the motor
@@ -125,6 +126,8 @@ public class StarterBotAuto extends OpMode
     private DcMotorEx launcher = null;
     private CRServo leftFeeder = null;
     private CRServo rightFeeder = null;
+
+    private DcMotorEx intakeMotor = null;
 
     /*
      * TECH TIP: State Machines
@@ -200,7 +203,15 @@ public class StarterBotAuto extends OpMode
          */
         mecanumDrive = new MecanumDrive(hardwareMap, telemetry);
         mecanumDrive.init();
-//
+        intakeMotor = hardwareMap.get(DcMotorEx.class, "intake");
+
+        intakeMotor.setDirection(DcMotorSimple.Direction.REVERSE);
+
+        intakeMotor.setMode(DcMotorEx.RunMode.RUN_USING_ENCODER);
+
+        intakeMotor.setZeroPowerBehavior(BRAKE);
+
+
 //        //This is commented because it doesn't have mecanum wheels
 ////        leftDrive  = hardwareMap.get(DcMotor.class, "left_drive");
 ////        rightDrive = hardwareMap.get(DcMotor.class, "right_drive");
@@ -358,6 +369,7 @@ public class StarterBotAuto extends OpMode
                  * state on our state machine. Otherwise, we reset the encoders on our drive motors
                  * and move onto the next state.
                  */
+                intakeMotor.setVelocity(INTAKE_TARGET_VELOCITY);
                 if(launch(false)) {
                     shotsToFire -= 1;
                     if(shotsToFire > 0) {
@@ -374,6 +386,8 @@ public class StarterBotAuto extends OpMode
                 break;
 
             case DRIVING_AWAY_FROM_GOAL:
+                intakeMotor.setVelocity(STOP_SPEED);
+
                 /*
                  * This is another function that returns a boolean. This time we return "true" if
                  * the robot has been within a tolerance of the target position for "holdSeconds."
@@ -394,6 +408,7 @@ public class StarterBotAuto extends OpMode
                 } else if (alliance == Alliance.BLUE){
                     robotRotationAngle = -45;
                 }
+                intakeMotor.setVelocity(INTAKE_TARGET_VELOCITY);
 
                 if(rotate(ROTATE_SPEED, robotRotationAngle, AngleUnit.DEGREES,1)){
 //                    leftFrontDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
@@ -401,10 +416,14 @@ public class StarterBotAuto extends OpMode
 //                    leftBackDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
 //                    rightBackDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
                     autonomousState = AutonomousState.DRIVING_OFF_LINE;
+                    intakeMotor.setVelocity(STOP_SPEED);
+
                 }
                 break;
 
             case DRIVING_OFF_LINE:
+                intakeMotor.setVelocity(STOP_SPEED);
+
                 if(drive(DRIVE_SPEED, -26, DistanceUnit.INCH, 1)){
                     autonomousState = AutonomousState.COMPLETE;
                 }

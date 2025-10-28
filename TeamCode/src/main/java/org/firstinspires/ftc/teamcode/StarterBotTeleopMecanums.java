@@ -62,7 +62,7 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 @TeleOp(name = "StarterBotTeleopMecanums", group = "StarterBot")
 //@Disabled
 public class StarterBotTeleopMecanums extends OpMode {
-    final double FEED_TIME_SECONDS = 5.0; //The feeder servos run this long when a shot is requested.
+    final double FEED_TIME_SECONDS = 0.2; //The feeder servos run this long when a shot is requested.
     final double STOP_SPEED = 0.0; //We send this power to the servos when we want them to stop.
     final double FULL_SPEED = 1.0;
 
@@ -72,7 +72,7 @@ public class StarterBotTeleopMecanums extends OpMode {
      * velocity. Here we are setting the target, and minimum velocity that the launcher should run
      * at. The minimum velocity is a threshold for determining when to fire.
      */
-    final double LAUNCHER_TARGET_VELOCITY = 1125;
+    final double LAUNCHER_TARGET_VELOCITY = 1125*1.2;
     final double LAUNCHER_MIN_VELOCITY = 1075;
 
 
@@ -411,6 +411,7 @@ public class StarterBotTeleopMecanums extends OpMode {
                     launchState = LaunchState.IDLE;
                     leftFeeder.setPower(STOP_SPEED);
                     rightFeeder.setPower(STOP_SPEED);
+                    launcher.setVelocity(0);
                 }
                 telemetry.addData("State","launching");
 
