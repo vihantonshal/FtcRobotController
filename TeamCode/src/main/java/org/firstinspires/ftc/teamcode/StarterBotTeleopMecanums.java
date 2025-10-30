@@ -252,14 +252,27 @@ public class StarterBotTeleopMecanums extends OpMode {
 
 
         if (gamepad2.x) {
+          //  intakeMotor.setVelocity(STOP_SPEED);
+
+            intakeMotor.setDirection(DcMotorSimple.Direction.REVERSE);
             intakeMotor.setVelocity(INTAKE_TARGET_VELOCITY);
+            telemetry.addData(" intake direction ", intakeMotor.getDirection());
+
         } else if (gamepad2.a) { // stop flywheel
             intakeMotor.setVelocity(STOP_SPEED);
         }
 
-        if (gamepad1.b) {
-            strafe_right();
+        else if(gamepad2.rightBumperWasPressed()) {
+
+
+            reverseintake(gamepad2.rightBumperWasPressed());
+
         }
+
+
+//        if (gamepad1.b) {
+//            strafe_right();
+     //   }
 
         /*
          * Now we call our "Launch" function.
@@ -411,13 +424,26 @@ public class StarterBotTeleopMecanums extends OpMode {
                     launchState = LaunchState.IDLE;
                     leftFeeder.setPower(STOP_SPEED);
                     rightFeeder.setPower(STOP_SPEED);
-                    launcher.setVelocity(0);
+//                    launcher.setVelocity(0);
                 }
                 telemetry.addData("State","launching");
 
                 break;
 
         }
+    }
+
+    void reverseintake(boolean shotRequested) {
+
+       // intakeMotor.setVelocity(STOP_SPEED);
+
+        intakeMotor.setDirection(DcMotorSimple.Direction.FORWARD);
+
+        intakeMotor.setVelocity(INTAKE_TARGET_VELOCITY);
+
+        telemetry.addData(" intake direction ", intakeMotor.getDirection());
+
+
     }
 
     void strafe_right()
