@@ -62,10 +62,9 @@ import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
  * main robot "loop," continuously checking for conditions that allow us to move to the next step.
  */
 
-@Autonomous(name="StarterBotAuto", group="StarterBot")
+@Autonomous(name = "StarterBotAuto", group = "StarterBot")
 //@Disabled
-public class StarterBotAuto extends OpMode
-{
+public class StarterBotAuto extends OpMode {
 
     final double FEED_TIME = 0.20; //The feeder servos run this long when a shot is requested.
 
@@ -75,7 +74,7 @@ public class StarterBotAuto extends OpMode
      * velocity. Here we are setting the target and minimum velocity that the launcher should run
      * at. The minimum velocity is a threshold for determining when to fire.
      */
-    final double LAUNCHER_TARGET_VELOCITY = 1125*1.2;
+    final double LAUNCHER_TARGET_VELOCITY = 1125 * 1.2;
     final double LAUNCHER_MIN_VELOCITY = 1075;
     final double INTAKE_TARGET_VELOCITY = 1125;
 
@@ -102,7 +101,7 @@ public class StarterBotAuto extends OpMode
     final double TICKS_PER_MM = (ENCODER_TICKS_PER_REV / (WHEEL_DIAMETER_MM * Math.PI));
     final double TRACK_WIDTH_MM = 404;
 
-    int shotsToFire = 3; //The number of shots to fire in this auto.
+    int shotsToFire = 4; //The number of shots to fire in this auto.
 
     double robotRotationAngle = 45;
 
@@ -119,7 +118,7 @@ public class StarterBotAuto extends OpMode
 //    private DcMotor leftDrive = null;
 //    private DcMotor rightDrive = null;
 
-//    private DcMotor leftFrontDrive = null;
+    //    private DcMotor leftFrontDrive = null;
 //    private DcMotor rightFrontDrive = null;
 //    private DcMotor leftBackDrive = null;
 //    private DcMotor rightBackDrive = null;
@@ -172,7 +171,9 @@ public class StarterBotAuto extends OpMode
      */
     private enum Alliance {
         RED,
-        BLUE;
+        BLUE,
+        BLUE_DEFENSE,
+        RED_DEFENSE;
     }
 
     /*
@@ -315,10 +316,17 @@ public class StarterBotAuto extends OpMode
         } else if (gamepad1.x) {
             alliance = Alliance.BLUE;
             telemetry.addData("Alliance", "BLUE");
+        } else if (gamepad1.y) {
+            alliance = Alliance.BLUE_DEFENSE;
+        } else if (gamepad1.a) {
+            alliance = Alliance.RED_DEFENSE;
         }
 
         telemetry.addData("Press X", "for BLUE");
         telemetry.addData("Press B", "for RED");
+        telemetry.addData("Selected Alliance", alliance);
+        telemetry.addData("Press Y", "for BLUE_DEFENSE");
+        telemetry.addData("Press A", "for RED_DEFENSE");
         telemetry.addData("Selected Alliance", alliance);
     }
 
@@ -343,7 +351,7 @@ public class StarterBotAuto extends OpMode
          * of the members of the enum for a match, since if we find the "break" line in one case,
          * we know our enum isn't reflecting a different state.
          */
-        switch (autonomousState){
+        switch (autonomousState) {
             /*
              * Since the first state of our auto is LAUNCH, this is the first "case" we encounter.
              * This case is very simple. We call our .launch() function with "true" in the parameter.
@@ -355,6 +363,9 @@ public class StarterBotAuto extends OpMode
             case LAUNCH:
                 launch(true);
                 autonomousState = AutonomousState.WAIT_FOR_LAUNCH;
+                if (alliance == Alliance.BLUE_DEFENSE || alliance == Alliance.RED_DEFENSE) {
+                    autonomousState = AutonomousState.ROTATING;
+                }
                 break;
 
             case WAIT_FOR_LAUNCH:
@@ -370,9 +381,10 @@ public class StarterBotAuto extends OpMode
                  * and move onto the next state.
                  */
                 intakeMotor.setVelocity(INTAKE_TARGET_VELOCITY);
-                if(launch(false)) {
+                // Stop the launcher before launching again
+                if (launch(false)) {
                     shotsToFire -= 1;
-                    if(shotsToFire > 0) {
+                    if (shotsToFire > 0) {
                         autonomousState = AutonomousState.LAUNCH;
                     } else {
 //                        leftFrontDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
@@ -393,7 +405,7 @@ public class StarterBotAuto extends OpMode
                  * the robot has been within a tolerance of the target position for "holdSeconds."
                  * Once the function returns "true" we reset the encoders again and move on.
                  */
-                if(drive(DRIVE_SPEED, -4, DistanceUnit.INCH, 1)){
+                if (drive(DRIVE_SPEED, -4, DistanceUnit.INCH, 1)) {
 //                    leftFrontDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
 //                    rightFrontDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
 //                    leftBackDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
@@ -403,14 +415,18 @@ public class StarterBotAuto extends OpMode
                 break;
 
             case ROTATING:
-                if(alliance == Alliance.RED){
+                if (alliance == Alliance.RED) {
                     robotRotationAngle = 45;
-                } else if (alliance == Alliance.BLUE){
+                } else if (alliance == Alliance.BLUE) {
                     robotRotationAngle = -45;
+                } else if (alliance == Alliance.BLUE_DEFENSE) {
+                    robotRotationAngle = -90;
+                } else if (alliance == Alliance.RED_DEFENSE) {
+                    robotRotationAngle = 90;
                 }
                 intakeMotor.setVelocity(INTAKE_TARGET_VELOCITY);
 
-                if(rotate(ROTATE_SPEED, robotRotationAngle, AngleUnit.DEGREES,1)){
+                if (rotate(ROTATE_SPEED, robotRotationAngle, AngleUnit.DEGREES, 1)) {
 //                    leftFrontDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
 //                    rightFrontDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
 //                    leftBackDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
@@ -423,8 +439,19 @@ public class StarterBotAuto extends OpMode
 
             case DRIVING_OFF_LINE:
                 intakeMotor.setVelocity(STOP_SPEED);
+                if (alliance == Alliance.BLUE_DEFENSE) {
+                    //then drive away from the white line
+                    if (drive(DRIVE_SPEED, 20, DistanceUnit.INCH, 1)) {
+                        autonomousState = AutonomousState.COMPLETE;
 
-                if(drive(DRIVE_SPEED, -26, DistanceUnit.INCH, 1)){
+                    }
+
+                } else if (alliance == Alliance.RED_DEFENSE) {
+                    if (drive(DRIVE_SPEED, 20, DistanceUnit.INCH, 1)) {
+                        autonomousState = AutonomousState.COMPLETE;
+
+                    }
+                } else if (drive(DRIVE_SPEED, -26, DistanceUnit.INCH, 1)) {
                     autonomousState = AutonomousState.COMPLETE;
                 }
                 break;
@@ -457,12 +484,13 @@ public class StarterBotAuto extends OpMode
     /**
      * Launches one ball, when a shot is requested spins up the motor and once it is above a minimum
      * velocity, runs the feeder servos for the right amount of time to feed the next ball.
+     *
      * @param shotRequested "true" if the user would like to fire a new shot, and "false" if a shot
      *                      has already been requested and we need to continue to move through the
      *                      state machine and launch the ball.
      * @return "true" for one cycle after a ball has been successfully launched, "false" otherwise.
      */
-    boolean launch(boolean shotRequested){
+    boolean launch(boolean shotRequested) {
         switch (launchState) {
             case IDLE:
                 if (shotRequested) {
@@ -472,7 +500,7 @@ public class StarterBotAuto extends OpMode
                 break;
             case PREPARE:
                 launcher.setVelocity(LAUNCHER_TARGET_VELOCITY);
-                if (launcher.getVelocity() > LAUNCHER_MIN_VELOCITY){
+                if (launcher.getVelocity() > LAUNCHER_MIN_VELOCITY) {
                     launchState = LaunchState.LAUNCH;
                     leftFeeder.setPower(1);
                     rightFeeder.setPower(1);
@@ -484,7 +512,7 @@ public class StarterBotAuto extends OpMode
                     leftFeeder.setPower(0);
                     rightFeeder.setPower(0);
 
-                    if(shotTimer.seconds() > TIME_BETWEEN_SHOTS){
+                    if (shotTimer.seconds() > TIME_BETWEEN_SHOTS) {
                         launchState = LaunchState.IDLE;
                         return true;
                     }
@@ -494,10 +522,10 @@ public class StarterBotAuto extends OpMode
     }
 
     /**
-     * @param speed From 0-1
-     * @param distance In specified unit
+     * @param speed        From 0-1
+     * @param distance     In specified unit
      * @param distanceUnit the unit of measurement for distance
-     * @param holdSeconds the number of seconds to wait at position before returning true.
+     * @param holdSeconds  the number of seconds to wait at position before returning true.
      * @return "true" if the motors are within tolerance of the target position for more than
      * holdSeconds. "false" otherwise.
      */
@@ -540,14 +568,14 @@ public class StarterBotAuto extends OpMode
     }
 
     /**
-     * @param speed From 0-1
-     * @param angle the amount that the robot should rotate
-     * @param angleUnit the unit that angle is in
+     * @param speed       From 0-1
+     * @param angle       the amount that the robot should rotate
+     * @param angleUnit   the unit that angle is in
      * @param holdSeconds the number of seconds to wait at position before returning true.
      * @return True if the motors are within tolerance of the target position for more than
-     *         holdSeconds. False otherwise.
+     * holdSeconds. False otherwise.
      */
-    boolean rotate(double speed, double angle, AngleUnit angleUnit, double holdSeconds){
+    boolean rotate(double speed, double angle, AngleUnit angleUnit, double holdSeconds) {
         final double TOLERANCE_MM = 10;
 
         /*
@@ -559,14 +587,14 @@ public class StarterBotAuto extends OpMode
          * need to travel, we just need to multiply the requested angle in radians by the radius
          * of our turning circle.
          */
-        double targetMm = angleUnit.toRadians(angle)*(TRACK_WIDTH_MM/2);
+        double targetMm = angleUnit.toRadians(angle) * (TRACK_WIDTH_MM / 2);
 
         /*
          * We need to set the left motor to the inverse of the target so that we rotate instead
          * of driving straight.
          */
-        double leftTargetPosition = -(targetMm*TICKS_PER_MM);
-        double rightTargetPosition = targetMm*TICKS_PER_MM;
+        double leftTargetPosition = -(targetMm * TICKS_PER_MM);
+        double rightTargetPosition = targetMm * TICKS_PER_MM;
         mecanumDrive.turnDegrees(angle, speed);
 //        leftDrive.setTargetPosition((int) leftTargetPosition);
 //        rightDrive.setTargetPosition((int) rightTargetPosition);

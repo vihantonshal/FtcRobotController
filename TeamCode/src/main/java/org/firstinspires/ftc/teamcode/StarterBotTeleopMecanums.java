@@ -397,6 +397,9 @@ public class StarterBotTeleopMecanums extends OpMode {
     void launch(boolean shotRequested) {
         switch (launchState) {
             case IDLE:
+                launcher.setVelocity(STOP_SPEED);
+//After launch, we are doing this to set the launcher speed to 0.
+                //If not working, then remove stop_speed
                 if (shotRequested) {
                     launchState = LaunchState.SPIN_UP;
                 }
