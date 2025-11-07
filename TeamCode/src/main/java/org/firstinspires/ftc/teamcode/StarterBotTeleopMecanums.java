@@ -328,7 +328,7 @@ public class StarterBotTeleopMecanums extends OpMode {
 //    }
 
     // AI Helped
-    void mecanumDrive(double forward, double strafe, double rotate) {
+    public void  mecanumDrive(double forward, double strafe, double rotate) {
 
         // --- Configuration Constants ---
         // Max power robot can reach (e.g., 0.8 for 80% of full speed)

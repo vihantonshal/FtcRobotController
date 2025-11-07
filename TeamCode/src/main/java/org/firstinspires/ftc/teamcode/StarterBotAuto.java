@@ -101,7 +101,7 @@ public class StarterBotAuto extends OpMode {
     final double TICKS_PER_MM = (ENCODER_TICKS_PER_REV / (WHEEL_DIAMETER_MM * Math.PI));
     final double TRACK_WIDTH_MM = 404;
 
-    int shotsToFire = 4; //The number of shots to fire in this auto.
+    int shotsToFire = 5; //The number of shots to fire in this auto.
 
     double robotRotationAngle = 45;
 
@@ -361,6 +361,7 @@ public class StarterBotAuto extends OpMode {
              * allowing it to cycle through and continue the process of launching the first ball.
              */
             case LAUNCH:
+                launcher.setVelocity(STOP_SPEED);
                 launch(true);
                 autonomousState = AutonomousState.WAIT_FOR_LAUNCH;
                 if (alliance == Alliance.BLUE_DEFENSE || alliance == Alliance.RED_DEFENSE) {
@@ -405,12 +406,13 @@ public class StarterBotAuto extends OpMode {
                  * the robot has been within a tolerance of the target position for "holdSeconds."
                  * Once the function returns "true" we reset the encoders again and move on.
                  */
-                if (drive(DRIVE_SPEED, -4, DistanceUnit.INCH, 1)) {
+                if (drive("",DRIVE_SPEED, -30, DistanceUnit.INCH, 1)) {
 //                    leftFrontDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
 //                    rightFrontDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
 //                    leftBackDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
 //                    rightBackDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-                    autonomousState = AutonomousState.ROTATING;
+                    //autonomousState = AutonomousState.ROTATING;
+                    autonomousState = AutonomousState.DRIVING_OFF_LINE;
                 }
                 break;
 
@@ -418,13 +420,13 @@ public class StarterBotAuto extends OpMode {
                 if (alliance == Alliance.RED) {
                     robotRotationAngle = 45;
                 } else if (alliance == Alliance.BLUE) {
-                    robotRotationAngle = -45;
+                    robotRotationAngle = -60;
                 } else if (alliance == Alliance.BLUE_DEFENSE) {
                     robotRotationAngle = -90;
                 } else if (alliance == Alliance.RED_DEFENSE) {
                     robotRotationAngle = 90;
                 }
-                intakeMotor.setVelocity(INTAKE_TARGET_VELOCITY);
+                //intakeMotor.setVelocity(INTAKE_TARGET_VELOCITY);
 
                 if (rotate(ROTATE_SPEED, robotRotationAngle, AngleUnit.DEGREES, 1)) {
 //                    leftFrontDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
@@ -441,19 +443,24 @@ public class StarterBotAuto extends OpMode {
                 intakeMotor.setVelocity(STOP_SPEED);
                 if (alliance == Alliance.BLUE_DEFENSE) {
                     //then drive away from the white line
-                    if (drive(DRIVE_SPEED, 20, DistanceUnit.INCH, 1)) {
+                    if (drive("",DRIVE_SPEED, 20, DistanceUnit.INCH, 1)) {
                         autonomousState = AutonomousState.COMPLETE;
 
                     }
 
                 } else if (alliance == Alliance.RED_DEFENSE) {
-                    if (drive(DRIVE_SPEED, 20, DistanceUnit.INCH, 1)) {
+                    if (drive("",DRIVE_SPEED, 20, DistanceUnit.INCH, 1)) {
                         autonomousState = AutonomousState.COMPLETE;
 
                     }
-                } else if (drive(DRIVE_SPEED, -26, DistanceUnit.INCH, 1)) {
-                    autonomousState = AutonomousState.COMPLETE;
-                }
+                } else //if (driveOffline(0.6,"LEFT",2)){
+                    //mecanumDrive.strafe(0.6,"LEFT",2);
+                  // if(mecanumDrive.mecanumFSRDrive(driveTimer,0,1,1,2)){
+                   if (drive("LEFT",DRIVE_SPEED, -26, DistanceUnit.INCH, 1)) {
+
+                       if(drive("",DRIVE_SPEED, -20, DistanceUnit.INCH, 1))
+                       {autonomousState = AutonomousState.COMPLETE;}
+               }
                 break;
         }
 
@@ -521,6 +528,11 @@ public class StarterBotAuto extends OpMode {
         return false;
     }
 
+    boolean driveOffline(double power,String direction, double holdSeconds){
+        mecanumDrive.strafe(power, direction, holdSeconds);
+        return (driveTimer.seconds() > holdSeconds);
+
+    }
     /**
      * @param speed        From 0-1
      * @param distance     In specified unit
@@ -529,7 +541,7 @@ public class StarterBotAuto extends OpMode {
      * @return "true" if the motors are within tolerance of the target position for more than
      * holdSeconds. "false" otherwise.
      */
-    boolean drive(double speed, double distance, DistanceUnit distanceUnit, double holdSeconds) {
+    boolean drive(String direction, double speed, double distance, DistanceUnit distanceUnit, double holdSeconds) {
         final double TOLERANCE_MM = 10;
         /*
          * In this function we use a DistanceUnits. This is a class that the FTC SDK implements
@@ -549,7 +561,7 @@ public class StarterBotAuto extends OpMode {
 //        rightBackDrive.setMode(DcMotor.RunMode.RUN_TO_POSITION);
 
         // distance in INCHES
-        mecanumDrive.driveDistance(distance, speed);
+        mecanumDrive.driveDistance(direction, distance, speed);
 //        leftDrive.setPower(speed);
 //        rightDrive.setPower(speed);
 
