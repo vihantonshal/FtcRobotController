@@ -66,7 +66,7 @@ import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 //@Disabled
 public class StarterBotAuto extends OpMode {
 
-    final double FEED_TIME = 0.20; //The feeder servos run this long when a shot is requested.
+    final double FEED_TIME = 0.40; //The feeder servos run this long when a shot is requested.
 
     /*
      * When we control our launcher motor, we are using encoders. These allow the control system
@@ -74,8 +74,8 @@ public class StarterBotAuto extends OpMode {
      * velocity. Here we are setting the target and minimum velocity that the launcher should run
      * at. The minimum velocity is a threshold for determining when to fire.
      */
-    final double LAUNCHER_TARGET_VELOCITY = 1125 * 1.2;
-    final double LAUNCHER_MIN_VELOCITY = 1075;
+    final double LAUNCHER_TARGET_VELOCITY = 1125*1.2;
+    final double LAUNCHER_MIN_VELOCITY = 1075*1.2;
     final double INTAKE_TARGET_VELOCITY = 1125;
 
     /*
@@ -453,14 +453,15 @@ public class StarterBotAuto extends OpMode {
                         autonomousState = AutonomousState.COMPLETE;
 
                     }
-                } else //if (driveOffline(0.6,"LEFT",2)){
-                    //mecanumDrive.strafe(0.6,"LEFT",2);
-                  // if(mecanumDrive.mecanumFSRDrive(driveTimer,0,1,1,2)){
-                   if (drive("LEFT",DRIVE_SPEED, -26, DistanceUnit.INCH, 1)) {
+                } else if (alliance== Alliance.BLUE && drive("LEFT",DRIVE_SPEED, -26, DistanceUnit.INCH, 1)) {
 
                        if(drive("",DRIVE_SPEED, -20, DistanceUnit.INCH, 1))
                        {autonomousState = AutonomousState.COMPLETE;}
-               }
+               } else if (alliance== Alliance.RED && drive("RIGHT",DRIVE_SPEED, -26, DistanceUnit.INCH, 1)) {
+
+                if(drive("",DRIVE_SPEED, -20, DistanceUnit.INCH, 1))
+                {autonomousState = AutonomousState.COMPLETE;}
+            }
                 break;
         }
 
@@ -500,6 +501,8 @@ public class StarterBotAuto extends OpMode {
     boolean launch(boolean shotRequested) {
         switch (launchState) {
             case IDLE:
+                launcher.setVelocity(STOP_SPEED);
+
                 if (shotRequested) {
                     launchState = LaunchState.PREPARE;
                     shotTimer.reset();

@@ -332,7 +332,7 @@ public class StarterBotTeleopMecanums extends OpMode {
 
         // --- Configuration Constants ---
         // Max power robot can reach (e.g., 0.8 for 80% of full speed)
-        final double MAX_SPEED_FACTOR = 0.5;
+        final double MAX_SPEED_FACTOR = 0.8;
         // Power Smoothing Exponent: 1.0 is linear, 3.0 is cubic (more sensitive to small inputs)
         final double POWER_SMOOTHING_EXPONENT = 3.0;
 
