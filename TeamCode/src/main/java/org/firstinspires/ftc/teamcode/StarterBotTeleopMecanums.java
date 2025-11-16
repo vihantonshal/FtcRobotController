@@ -62,7 +62,7 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 @TeleOp(name = "StarterBotTeleopMecanums", group = "StarterBot")
 //@Disabled
 public class StarterBotTeleopMecanums extends OpMode {
-    final double FEED_TIME_SECONDS = 0.2; //The feeder servos run this long when a shot is requested.
+    final double FEED_TIME_SECONDS = 0.4; //The feeder servos run this long when a shot is requested.
     final double STOP_SPEED = 0.0; //We send this power to the servos when we want them to stop.
     final double FULL_SPEED = 1.0;
 
@@ -72,11 +72,11 @@ public class StarterBotTeleopMecanums extends OpMode {
      * velocity. Here we are setting the target, and minimum velocity that the launcher should run
      * at. The minimum velocity is a threshold for determining when to fire.
      */
-    final double LAUNCHER_TARGET_VELOCITY = 1125*1.2;
-    final double LAUNCHER_MIN_VELOCITY = 1075;
+    final double LAUNCHER_TARGET_VELOCITY = 1125*1.3;
+    final double LAUNCHER_MIN_VELOCITY = 1125*1.3;
 
 
-    final double INTAKE_TARGET_VELOCITY = 1125;
+    final double INTAKE_TARGET_VELOCITY = 1125*1.20;
     // Declare OpMode members.
     private DcMotor leftFrontDrive = null;
     private DcMotor rightFrontDrive = null;
@@ -397,7 +397,7 @@ public class StarterBotTeleopMecanums extends OpMode {
     void launch(boolean shotRequested) {
         switch (launchState) {
             case IDLE:
-                launcher.setVelocity(STOP_SPEED);
+                //launcher.setVelocity(STOP_SPEED);
 //After launch, we are doing this to set the launcher speed to 0.
                 //If not working, then remove stop_speed
                 if (shotRequested) {
@@ -427,7 +427,7 @@ public class StarterBotTeleopMecanums extends OpMode {
                     launchState = LaunchState.IDLE;
                     leftFeeder.setPower(STOP_SPEED);
                     rightFeeder.setPower(STOP_SPEED);
-//                    launcher.setVelocity(0);
+                   // launcher.setVelocity(0);
                 }
                 telemetry.addData("State","launching");
 
@@ -449,15 +449,8 @@ public class StarterBotTeleopMecanums extends OpMode {
 
     }
 
-    void strafe_right()
-    {
 
-        leftFrontDrive.setPower(1.0);
-        rightFrontDrive.setPower(-1.0);
-        leftBackDrive.setPower(-1.0);
-        rightBackDrive.setPower(1.0);
 
 
     }
 
-}

@@ -210,59 +210,7 @@ public class StarterBotAuto extends OpMode {
 
         intakeMotor.setMode(DcMotorEx.RunMode.RUN_USING_ENCODER);
 
-        intakeMotor.setZeroPowerBehavior(BRAKE);
-
-
-//        //This is commented because it doesn't have mecanum wheels
-////        leftDrive  = hardwareMap.get(DcMotor.class, "left_drive");
-////        rightDrive = hardwareMap.get(DcMotor.class, "right_drive");
-//        leftFrontDrive = hardwareMap.get(DcMotor.class, "front_left_motor");
-//        rightFrontDrive = hardwareMap.get(DcMotor.class, "front_right_motor");
-//        leftBackDrive = hardwareMap.get(DcMotor.class, "back_left_motor");
-//        rightBackDrive = hardwareMap.get(DcMotor.class, "back_right_motor");
-//
-//
-//
-//        launcher = hardwareMap.get(DcMotorEx.class,"launcher");
-//        leftFeeder = hardwareMap.get(CRServo.class, "left_feeder");
-//        rightFeeder = hardwareMap.get(CRServo.class, "right_feeder");
-
-
-        /*
-         * To drive forward, most robots need the motor on one side to be reversed,
-         * because the axles point in opposite directions. Pushing the left stick forward
-         * MUST make the robot go forward. So, adjust these two lines based on your first test drive.
-         * Note: The settings here assume direct drive on left and right wheels. Gear
-         * Reduction or 90° drives may require direction flips
-         */
-////        leftDrive.setDirection(DcMotor.Direction.REVERSE);
-////        rightDrive.setDirection(DcMotor.Direction.FORWARD);
-//
-//        leftFrontDrive.setDirection(DcMotor.Direction.REVERSE);
-//        rightFrontDrive.setDirection(DcMotor.Direction.FORWARD);
-//        leftBackDrive.setDirection(DcMotor.Direction.REVERSE);
-//        rightBackDrive.setDirection(DcMotor.Direction.FORWARD);
-        /*
-         * Here we reset the encoders on our drive motors before we start moving.
-         */
-//        leftDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-//        rightDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-
-
-
-        /*
-         * Setting zeroPowerBehavior to BRAKE enables a "brake mode." This causes the motor to
-         * slow down much faster when it is coasting. This creates a much more controllable
-         * drivetrain, as the robot stops much quicker.
-         */
-//        leftDrive.setZeroPowerBehavior(BRAKE);
-//        rightDrive.setZeroPowerBehavior(BRAKE);
-
-//        leftFrontDrive.setZeroPowerBehavior(BRAKE);
-//        rightFrontDrive.setZeroPowerBehavior(BRAKE);
-//        leftBackDrive.setZeroPowerBehavior(BRAKE);
-//        rightBackDrive.setZeroPowerBehavior(BRAKE);
-        launcher = hardwareMap.get(DcMotorEx.class, "launcher");
+        intakeMotor.setZeroPowerBehavior(BRAKE);        launcher = hardwareMap.get(DcMotorEx.class, "launcher");
 
         launcher.setZeroPowerBehavior(BRAKE);
 
@@ -407,11 +355,7 @@ public class StarterBotAuto extends OpMode {
                  * Once the function returns "true" we reset the encoders again and move on.
                  */
                 if (drive("",DRIVE_SPEED, -30, DistanceUnit.INCH, 1)) {
-//                    leftFrontDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-//                    rightFrontDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-//                    leftBackDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-//                    rightBackDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-                    //autonomousState = AutonomousState.ROTATING;
+
                     autonomousState = AutonomousState.DRIVING_OFF_LINE;
                 }
                 break;
@@ -429,10 +373,7 @@ public class StarterBotAuto extends OpMode {
                 //intakeMotor.setVelocity(INTAKE_TARGET_VELOCITY);
 
                 if (rotate(ROTATE_SPEED, robotRotationAngle, AngleUnit.DEGREES, 1)) {
-//                    leftFrontDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-//                    rightFrontDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-//                    leftBackDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-//                    rightBackDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+
                     autonomousState = AutonomousState.DRIVING_OFF_LINE;
                     intakeMotor.setVelocity(STOP_SPEED);
 
@@ -611,18 +552,6 @@ public class StarterBotAuto extends OpMode {
         double leftTargetPosition = -(targetMm * TICKS_PER_MM);
         double rightTargetPosition = targetMm * TICKS_PER_MM;
         mecanumDrive.turnDegrees(angle, speed);
-//        leftDrive.setTargetPosition((int) leftTargetPosition);
-//        rightDrive.setTargetPosition((int) rightTargetPosition);
-//
-//        leftDrive.setMode(DcMotor.RunMode.RUN_TO_POSITION);
-//        rightDrive.setMode(DcMotor.RunMode.RUN_TO_POSITION);
-//
-//        leftDrive.setPower(speed);
-//        rightDrive.setPower(speed);
-
-//        if((Math.abs(leftTargetPosition - leftDrive.getCurrentPosition())) > (TOLERANCE_MM * TICKS_PER_MM)){
-//            driveTimer.reset();
-//        }
 
         return (driveTimer.seconds() > holdSeconds);
     }
