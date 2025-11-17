@@ -62,9 +62,11 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 @TeleOp(name = "StarterBotTeleopMecanums", group = "StarterBot")
 //@Disabled
 public class StarterBotTeleopMecanums extends OpMode {
-    final double FEED_TIME_SECONDS = 0.4; //The feeder servos run this long when a shot is requested.
+    final double FEED_TIME_SECONDS = 0.2; //The feeder servos run this long when a shot is requested.
     final double STOP_SPEED = 0.0; //We send this power to the servos when we want them to stop.
     final double FULL_SPEED = 1.0;
+
+    final double WAIT_FOR_LAUNCH_MOTOR_STABILIZATION  = 0.3;
 
     /*
      * When we control our launcher motor, we are using encoders. These allow the control system
@@ -73,8 +75,7 @@ public class StarterBotTeleopMecanums extends OpMode {
      * at. The minimum velocity is a threshold for determining when to fire.
      */
     final double LAUNCHER_TARGET_VELOCITY = 1125*1.3;
-    final double LAUNCHER_MIN_VELOCITY = 1125*1.3;
-
+    final double LAUNCHER_MIN_VELOCITY = 1075*1.3;
 
     final double INTAKE_TARGET_VELOCITY = 1125*1.20;
     // Declare OpMode members.
@@ -89,6 +90,8 @@ public class StarterBotTeleopMecanums extends OpMode {
     private CRServo rightFeeder = null;
 
     ElapsedTime feederTimer = new ElapsedTime();
+
+    ElapsedTime launch_wait_Timer = new ElapsedTime();
 
     /*
      * TECH TIP: State Machines
@@ -111,6 +114,7 @@ public class StarterBotTeleopMecanums extends OpMode {
         SPIN_UP,
         LAUNCH,
         LAUNCHING,
+        WAIT_FOR_LAUNCH_MOTOR,
     }
 
     private LaunchState launchState;
@@ -186,11 +190,16 @@ public class StarterBotTeleopMecanums extends OpMode {
         rightBackDrive.setZeroPowerBehavior(BRAKE);
        launcher.setZeroPowerBehavior(BRAKE);
         intakeMotor.setZeroPowerBehavior(BRAKE);
+
+        launcher.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
         /*
          * set Feeders to an initial value to initialize the servo controller
          */
         leftFeeder.setPower(STOP_SPEED);
         rightFeeder.setPower(STOP_SPEED);
+
+
+        launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(300, 0, 0, 10));
 //
 //    launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(300, 0, 0, 10));
 
@@ -239,7 +248,7 @@ public class StarterBotTeleopMecanums extends OpMode {
          * more complex maneuvers.
          */
         mecanumDrive(-gamepad1.left_stick_y, gamepad1.left_stick_x,gamepad1.right_stick_x);
-
+        //launcher.setVelocity(LAUNCHER_MIN_VELOCITY);
         /*
          * Here we give the user control of the speed of the launcher motor without automatically
          * queuing a shot.
@@ -283,7 +292,7 @@ public class StarterBotTeleopMecanums extends OpMode {
          * Show the state and motor powers
          */
         telemetry.addData("State", launchState);
-        telemetry.addData("motorSpeed", launcher.getVelocity());
+//        telemetry.addData("motorSpeed", launcher.getVelocity());
 
     }
 
@@ -408,10 +417,21 @@ public class StarterBotTeleopMecanums extends OpMode {
             case SPIN_UP:
                 launcher.setVelocity(LAUNCHER_TARGET_VELOCITY);
                 if (launcher.getVelocity() > LAUNCHER_MIN_VELOCITY) {
-                    launchState = LaunchState.LAUNCH;
+                    launch_wait_Timer.reset();
+                    launchState = LaunchState.WAIT_FOR_LAUNCH_MOTOR;
+                    telemetry.addData("Speed after SPIN_UP ", launcher.getVelocity());
                 }
                 telemetry.addData("State","spin_up");
 
+
+
+                break;
+            case WAIT_FOR_LAUNCH_MOTOR :
+                if (launch_wait_Timer.seconds() > WAIT_FOR_LAUNCH_MOTOR_STABILIZATION ) {
+
+                     launchState = LaunchState.LAUNCH;
+                }
+                telemetry.addData("State","WAIT_FOR_LAUNCH_MOTOR");
                 break;
             case LAUNCH:
                 leftFeeder.setPower(FULL_SPEED);
@@ -427,7 +447,7 @@ public class StarterBotTeleopMecanums extends OpMode {
                     launchState = LaunchState.IDLE;
                     leftFeeder.setPower(STOP_SPEED);
                     rightFeeder.setPower(STOP_SPEED);
-                   // launcher.setVelocity(0);
+                    launcher.setVelocity(0);
                 }
                 telemetry.addData("State","launching");
 
@@ -435,6 +455,8 @@ public class StarterBotTeleopMecanums extends OpMode {
 
         }
     }
+
+
 
     void reverseintake(boolean shotRequested) {
 
