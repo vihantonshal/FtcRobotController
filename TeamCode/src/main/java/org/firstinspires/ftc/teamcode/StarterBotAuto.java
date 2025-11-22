@@ -222,6 +222,7 @@ public class StarterBotAuto extends OpMode {
          */
         launcher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
 
+        launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(300, 0, 0, 10));
         /*
          * Here we set the aforementioned PID coefficients. You shouldn't have to do this for any
          * other motors on this robot.
