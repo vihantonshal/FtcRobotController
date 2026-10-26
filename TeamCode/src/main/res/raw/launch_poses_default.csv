@@ -1,0 +1,34 @@
+# Built-in good launch poses for LaunchAssist. This file is part of the app, so it is deployed with the code.
+# Loaded at every TeleOp INIT, before the hub's own /sdcard/FIRST/BioBuzz/launch_log.csv. The robot never changes it.
+# Lines starting with # are notes and are skipped. Only lines with type SUCCESS count.
+#
+# Every line needs all 12 columns, in this order, separated by commas (spaces around values are OK):
+#   time_ms          record only    any whole number, e.g. 0
+#   type             REQUIRED       must be SUCCESS
+#   x_in             record only    any number (odometry from TeleOp INIT, not used for aligning)
+#   y_in             record only    any number
+#   heading_deg      record only    any number
+#   hive_cluster     REQUIRED       RED SCORING, RED AUDIENCE, BLUE AUDIENCE or BLUE SCORING
+#   tag_range_in     REQUIRED       flat distance from the camera to the CELL opening, inches
+#   tag_bearing_deg  REQUIRED       angle to the CELL opening, + = opening to the robot's left
+#   tag_yaw_deg      REQUIRED       the camera's yaw to the CELL, degrees
+#   launcher_tps     record only    flywheel ticks/s of that shot (the speed itself comes from LauncherSubsystem)
+#   launcher_rpm     record only    any number
+#   flywheel_dir     record only    e.g. FORWARD
+#
+# How to add a pose: copy a SUCCESS line from a pulled launch_log.csv, or the "Last launch CSV" line on
+# FTC Dashboard, paste it below the header, and deploy. Re-record all poses if the camera is moved or re-angled.
+#
+# SIMULATED STARTING POSES (switched on): one per HIVE CELL, from the Octave launcher simulation v3
+# (2026-10-25, Runway v6 77 degree exit, Hogback wheel): the robot's front 23 in from the HIVE stand, square
+# to the CELL, launcher lined up with the opening. All 4 POLLEN scored from 9 to 33 in there, so a pose that
+# is off by an inch or two still scores. Numbers as the SDK reports them for the front C270 (5.5 in left of
+# the launcher, 12.6 in up): range = hypot(x, y) 58.7 in at 38 deg camera tilt, 59.8 in at 45 deg (59.2 used);
+# bearing -5.3 deg (the opening is right of the camera); yaw 0 when square. launcher_tps is only a record.
+# Replace them with real SUCCESS lines from launch_log.csv as soon as the robot scores on a field (and
+# delete these four), or right away if the camera tilt or mount changes.
+time_ms,type,x_in,y_in,heading_deg,hive_cluster,tag_range_in,tag_bearing_deg,tag_yaw_deg,launcher_tps,launcher_rpm,flywheel_dir
+0,SUCCESS,0,0,0,RED AUDIENCE,59.2,-5.3,0.0,1464,3137,FORWARD
+0,SUCCESS,0,0,0,RED SCORING,59.2,-5.3,0.0,1464,3137,FORWARD
+0,SUCCESS,0,0,0,BLUE AUDIENCE,59.2,-5.3,0.0,1464,3137,FORWARD
+0,SUCCESS,0,0,0,BLUE SCORING,59.2,-5.3,0.0,1464,3137,FORWARD

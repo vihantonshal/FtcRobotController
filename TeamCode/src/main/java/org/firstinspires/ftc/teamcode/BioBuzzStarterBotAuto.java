@@ -38,25 +38,15 @@ import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 import com.qualcomm.hardware.lynx.LynxModule;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.util.ElapsedTime;
-import com.qualcomm.robotcore.util.Range;
 
-import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
-import org.firstinspires.ftc.robotcore.internal.system.AppUtil;
 import org.firstinspires.ftc.teamcode.subsystems.AprilTagVision;
+import org.firstinspires.ftc.teamcode.subsystems.AutoLog;
 import org.firstinspires.ftc.teamcode.subsystems.IntakeSubsystem;
 import org.firstinspires.ftc.teamcode.subsystems.LauncherSubsystem;
 import org.firstinspires.ftc.teamcode.subsystems.MecanumDriveSubsystem;
 import org.firstinspires.ftc.teamcode.subsystems.RobotSwitches;
-import org.firstinspires.ftc.vision.apriltag.AprilTagClusterDetection;
 import org.firstinspires.ftc.vision.apriltag.AprilTagDetection;
 
-import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.List;
 import java.util.Locale;
 
 
@@ -64,6 +54,13 @@ import java.util.Locale;
  * This file includes an autonomous file for the goBILDA® StarterBot for the
  * 2026-2027 FIRST® Tech Challenge season BIOBUZZ™. It uses the same subsystem classes as the
  * TeleOp (see the "subsystems" folder), so the hardware names and tuning numbers live in one place.
+ * This file is the PLAN: which steps, in which order, where to go and how long each may take.
+ * HOW the robot does each thing is in the subsystems:
+ *   MecanumDriveSubsystem  driveToPoint() (drive to a spot with odometry), turnToHeading(), turnToCell()
+ *   LauncherSubsystem      spinUp(), update(true) to launch, setCell() for the distance-based speed
+ *   IntakeSubsystem        helpFeed(): the roller helps push balls while the launcher feeds
+ *   AprilTagVision         closestTag(): the up CELL in view, or null
+ *   AutoLog                the step log and tag log files, and the "Step 1", "Step 2"... lines
  *
  * This robot starts up against our ALLIANCE wall facing the HIVE. It first drives to a spot where
  * the camera can read the up CELL's AprilTags (LOOK), turns to face the up CELL (while the
@@ -131,10 +128,10 @@ public class BioBuzzStarterBotAuto extends OpMode
     /*
      * SEARCH: turn in place up to SEARCH_ANGLE_DEG to the left and to the right of the start
      * heading. Slow, so the camera picture (which is always a little late) keeps up.
+     * (How close counts as "turned there": MecanumDriveSubsystem.HEADING_TOLERANCE_DEG.)
      */
     final double SEARCH_ANGLE_DEG = 45;
     final double SEARCH_TURN_POWER = 0.2;
-    final double HEADING_TOLERANCE_DEG = 3;
     // After FIND_TIMEOUT_SECONDS, how long SEARCH may take to turn back to the start heading. If
     // the robot can't turn (stuck on something), it launches from wherever it is.
     final double TURN_BACK_TIMEOUT_SECONDS = 2;
@@ -151,21 +148,16 @@ public class BioBuzzStarterBotAuto extends OpMode
      * perimeter wall" (Manual 10.3.1). The robot starts with its back against the wall, so at 7.5 in
      * its back edge is 7.5 in from the wall: still 3.5 in inside the zone's 11 in tape line, and one
      * POLLEN width plus a few inches clear of POLLEN lying against the wall (5 in left almost none).
+     * How fast LOOK and PARK drive to a spot: MecanumDriveSubsystem GOTO_MAX_POWER and the other GOTO_ numbers.
      */
     final double PARK_FORWARD_IN = 7.5;
     final double PARK_LEFT_IN = 34;
-    // How LOOK and PARK drive to a spot (driveToward()).
-    final double PARK_TOLERANCE_IN = 1.5;
-    final double PARK_MAX_POWER = 0.4;
-    final double PARK_MIN_POWER = 0.1;     // enough to keep moving when the spot is close
-    final double PARK_GAIN = 0.05;         // power per inch still to go
-    final double PARK_HEADING_GAIN = 0.01; // turn power per degree, to keep facing the HIVE
     final double PARK_TIMEOUT_SECONDS = 8; // stop wherever it is, so AUTO never runs out mid-move
     private boolean parkFacingStart = false;
 
     /*
      * OWN-SIDE GUARD (Competition Manual G402): during AUTO, columns A-C are red's side of the
-     * FIELD and D-F blue's, so the line between them is 72 in from each ALLIANCE wall. driveToward()
+     * FIELD and D-F blue's, so the line between them is 72 in from each ALLIANCE wall. goTo()
      * never drives the robot more than MAX_FORWARD_IN forward of where it stood at INIT; past it,
      * it may still slide sideways or back up, but not go further toward the middle. From the
      * ALLIANCE wall the robot's center starts 63 in from that line. At full speed it takes about
@@ -176,53 +168,22 @@ public class BioBuzzStarterBotAuto extends OpMode
      */
     final double MAX_FORWARD_IN = 24;
     private boolean ownSideLimitLogged = false;   // one step-log row per step when the guard acts
-    // Where the robot launched from, shown on the Driver Hub from LAUNCH to the end of AUTO.
-    private String launchSpot = null;
 
     // A timer that restarts at the beginning of every step of our auto.
     private final ElapsedTime stepTimer = new ElapsedTime();
     // A timer from the end of LOOK, for FIND_TIMEOUT_SECONDS.
     private final ElapsedTime findTimer = new ElapsedTime();
-    // A timer from START, for AUTO_SECONDS.
-    private final ElapsedTime autoTimer = new ElapsedTime();
     // Where the robot faced at START (degrees, + = left), and which way the search turns next.
     private double startHeadingDeg = 0;
     private double searchTargetDeg = 0;
-
-    /*
-     * STEP LOG: every step change (and START and STOP) is one row in /sdcard/FIRST/BioBuzz/auto_log.csv
-     * on the Control Hub, with the reason, the time since START and where odometry says the robot is.
-     * Download it after a match:  adb pull /sdcard/FIRST/BioBuzz/auto_log.csv
-     * The same steps also stay on the Driver Hub (the "Step 1", "Step 2"... lines) until the next INIT.
-     * "run" is the date and time START was pressed, so the rows of one match belong together.
-     */
-    public static final String LOG_PATH = "BioBuzz/auto_log.csv";
-    private static final String LOG_HEADER = "run,t_s,from,to,reason,x_in,y_in,heading_deg,up_cell,launcher_tps";
-    private final File logFile = new File(AppUtil.ROOT_FOLDER, LOG_PATH);
-    private final List<String> stepHistory = new ArrayList<>();
-    private String runId = "";
-    private String logProblem = null;   // shown on the Driver Hub if the file can't be written
-
-    /*
-     * TAG LOG: did the camera see the HIVE's AprilTags, and which? One row in
-     * /sdcard/FIRST/BioBuzz/auto_tags.csv each time what the camera sees changes (another CELL, more or
-     * fewer of its tags, UP or down, or nothing), and at most once a second while it stays the same.
-     * Example row: run, 2.97, AIM, RED AUDIENCE IDs 34-37 2/4 tags UP 35 in 2 deg left
-     * SDK 12 reports a HIVE cluster's 4 tags together, so a row shows the cluster's ID range and how
-     * many of its tags were found, not single tag numbers. "none" = no tag seen.
-     */
-    public static final String TAG_LOG_PATH = "BioBuzz/auto_tags.csv";
-    private static final String TAG_LOG_HEADER = "run,t_s,state,camera_sees";
-    private final File tagLogFile = new File(AppUtil.ROOT_FOLDER, TAG_LOG_PATH);
-    private final ElapsedTime tagLogTimer = new ElapsedTime();
-    private String lastSeenKey = null;      // what was seen at the last tag-log row (without distances)
-    private String cameraSees = "";         // the Driver Hub's "Camera sees" line
 
     // The robot's parts. Switched-off parts (RobotSwitches) do nothing.
     private MecanumDriveSubsystem drive;
     private IntakeSubsystem intake;
     private LauncherSubsystem launcher;
     private AprilTagVision vision;
+    // The step log and tag log (see AutoLog), and the match clock from START.
+    private AutoLog log;
 
     /*
      * TECH TIP: State Machines
@@ -271,7 +232,9 @@ public class BioBuzzStarterBotAuto extends OpMode
         drive = new MecanumDriveSubsystem(hardwareMap);
         intake = new IntakeSubsystem(hardwareMap);
         launcher = new LauncherSubsystem(hardwareMap);
+        launcher.setPulseFeed(true);   // about 0.6 s per ball, as in the Octave launcher check
         vision = new AprilTagVision(hardwareMap);
+        log = new AutoLog(drive, vision, launcher);
 
         // Tell the driver that initialization is complete.
         telemetry.addData("Status", "Initialized");
@@ -303,11 +266,10 @@ public class BioBuzzStarterBotAuto extends OpMode
     public void start() {
         stepTimer.reset();
         findTimer.reset();
-        autoTimer.reset();
+        log.start();
         startHeadingDeg = drive.getPoseHeadingDeg();
         searchTargetDeg = startHeadingDeg + SEARCH_ANGLE_DEG;   // look left first
-        runId = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date());
-        logStep("INIT", autonomousState.name(), "START pressed");
+        log.step("INIT", autonomousState.name(), "START pressed");
     }
 
     /*
@@ -315,23 +277,17 @@ public class BioBuzzStarterBotAuto extends OpMode
      */
     @Override
     public void loop() {
-        // Updates the odometry pose.
-        drive.update();
-        // The flywheel speed follows the distance to the up CELL (LauncherSubsystem, distance-based speed).
-        AprilTagClusterDetection seenCell = vision.closestTag();
-        launcher.setCellRange(seenCell != null ? seenCell.ftcPose.range : Double.NaN);
-
-        // The intake only helps while the windmill feeds, so it starts from 0 each loop.
-        double intakePower = 0;
+        drive.update();                          // where the robot is (odometry)
+        launcher.setCell(vision.closestTag());   // the flywheel speed follows the distance to the up CELL
 
         // Out of time: whatever we are doing, stop and go park, so PARK gets its full time.
         boolean beforePark = autonomousState != AutonomousState.PARK
                 && autonomousState != AutonomousState.COMPLETE;
-        if (beforePark && autoTimer.seconds() > AUTO_SECONDS - PARK_TIMEOUT_SECONDS) {
+        if (beforePark && log.secondsSinceStart() > AUTO_SECONDS - PARK_TIMEOUT_SECONDS) {
             drive.stop();
             launcher.stop();
-            if (launchSpot == null) {
-                recordLaunchSpot();   // shows where it stopped, though it never launched
+            if (!log.hasLaunchSpot()) {
+                log.launchSpot(startHeadingDeg);   // shows where it stopped, though it never launched
             }
             nextStep(AutonomousState.PARK, String.format(Locale.US, "AUTO deadline (%.0f s)",
                     AUTO_SECONDS - PARK_TIMEOUT_SECONDS));
@@ -355,16 +311,15 @@ public class BioBuzzStarterBotAuto extends OpMode
                 }
                 break;
             case AIM:
-                // Start the flywheel now so it is fast when we get to LAUNCH. No feeding yet.
+                // Keep the flywheel spinning so it is fast when we get to LAUNCH. No feeding yet.
                 launcher.spinUp();
                 if (tryOtherSide()) {
                     break;
                 }
                 if (aim()) {
                     drive.stop();
-                    // aim() turned the wheels, so start the next move from 0.
-                    drive.resetEncoders();
-                    recordLaunchSpot();
+                    drive.resetEncoders();   // aim() turned the wheels, so start the next move from 0
+                    log.launchSpot(startHeadingDeg);
                     nextStep(AutonomousState.LAUNCH, !vision.isEnabled() ? "camera off"
                             : findTimer.seconds() > FIND_TIMEOUT_SECONDS ? "find timeout" : "aimed at up CELL");
                 } else if (vision.closestTag() == null && stepTimer.seconds() > 0.5) {
@@ -384,7 +339,7 @@ public class BioBuzzStarterBotAuto extends OpMode
                     if (vision.closestTag() != null && findTimer.seconds() <= FIND_TIMEOUT_SECONDS) {
                         nextStep(AutonomousState.AIM, "up CELL in view");
                     } else {
-                        recordLaunchSpot();
+                        log.launchSpot(startHeadingDeg);
                         nextStep(AutonomousState.LAUNCH,
                                 findTimer.seconds() > FIND_TIMEOUT_SECONDS + TURN_BACK_TIMEOUT_SECONDS
                                         ? "find timeout; turn-back timeout" : "find timeout; turned back");
@@ -392,14 +347,10 @@ public class BioBuzzStarterBotAuto extends OpMode
                 }
                 break;
             case LAUNCH:
-                launcher.update(true);
-                if (launcher.isFeeding()) {
-                    intakePower = 0.5;
-                }
+                launcher.update(true);   // launch: the windmill feeds whenever the flywheel is fast enough
                 // With the launcher switched off there is nothing to launch, so move straight on.
                 if (!launcher.isEnabled() || stepTimer.seconds() > LAUNCH_SECONDS) {
                     launcher.stop();
-                    intakePower = 0;
                     nextStep(AutonomousState.PARK, launcher.isEnabled() ? "launch time up" : "launcher off");
                 }
                 break;
@@ -415,22 +366,18 @@ public class BioBuzzStarterBotAuto extends OpMode
                 break;
         }
 
-        // In the Auto only the intake roller helps; the corner servos stay still.
-        intake.run(intakePower, 0);
+        // The intake roller helps push the balls along while the windmill feeds, and rests otherwise.
+        intake.helpFeed(launcher.isFeeding());
 
         /*
          * Here is our telemetry that keeps us informed of what is going on in the robot. Since this
          * part of the code exists outside of our switch statement, it runs once every loop,
          * no matter what state our robot is in.
          */
-        logTagsIfChanged();
+        log.tags(autonomousState.name());
         telemetry.addData("AutoState", autonomousState);
         telemetry.addData("Step time", "%.1f s", stepTimer.seconds());
-        telemetry.addData("Camera sees", cameraSees);
-        if (launchSpot != null) {
-            telemetry.addData("Launched", launchSpot);
-        }
-        addStepTelemetry();
+        log.addTelemetry(telemetry);
         vision.addTelemetry(telemetry);
         launcher.addTelemetry(telemetry);
         drive.addPositionTelemetry(telemetry);
@@ -442,10 +389,10 @@ public class BioBuzzStarterBotAuto extends OpMode
      */
     @Override
     public void stop() {
-        // drive and vision are null if INIT failed (for example a wrong name in the configuration).
-        // runId is empty if STOP came before START: nothing ran, so there is nothing to log.
-        if (drive != null && !runId.isEmpty()) {
-            logStep(autonomousState.name(), "STOP",
+        // log and vision are null if INIT failed (for example a wrong name in the configuration).
+        // A STOP before START ran nothing, so there is nothing to log.
+        if (log != null && log.isStarted()) {
+            log.step(autonomousState.name(), "STOP",
                     autonomousState == AutonomousState.COMPLETE ? "AUTO over" : "stopped before COMPLETE");
         }
         if (vision != null) {
@@ -455,114 +402,46 @@ public class BioBuzzStarterBotAuto extends OpMode
 
     // Move to the next step of the state machine, say why in the step log, and restart the step timer.
     void nextStep(AutonomousState next, String reason) {
-        logStep(autonomousState.name(), next.name(), reason);
+        log.step(autonomousState.name(), next.name(), reason);
         autonomousState = next;
         stepTimer.reset();
         ownSideLimitLogged = false;
     }
 
     /**
-     * Adds one row to the step log file and one line to the Driver Hub's step list. Called only when
-     * the step changes (about 7 times a match), so writing the file does not slow the loop down.
-     */
-    void logStep(String from, String to, String reason) {
-        double t = autoTimer.seconds();
-        AprilTagClusterDetection cell = vision.closestTag();
-        String upCell = !vision.isEnabled() ? "camera off" : cell == null ? "none" : cell.metadata.shortName;
-        stepHistory.add(String.format(Locale.US, "%5.1f s  %s -> %s: %s", t, from, to, reason));
-        String row = String.format(Locale.US, "%s,%.2f,%s,%s,%s,%.1f,%.1f,%.1f,%s,%.0f",
-                runId, t, from, to, reason, drive.getPoseX(), drive.getPoseY(), drive.getPoseHeadingDeg(),
-                upCell, launcher.getVelocity());
-        appendRow(logFile, LOG_HEADER, row, "step log");
-    }
-
-    /**
-     * One row in the tag log when what the camera sees changes, or once a second while it stays the
-     * same, so the file shows when the camera saw the HIVE's tags and when it saw nothing.
-     */
-    void logTagsIfChanged() {
-        String key = vision.seenSummary(false);
-        cameraSees = vision.seenSummary(true);
-        if (key.equals(lastSeenKey) && tagLogTimer.seconds() < 1) {
-            return;
-        }
-        lastSeenKey = key;
-        tagLogTimer.reset();
-        appendRow(tagLogFile, TAG_LOG_HEADER, String.format(Locale.US, "%s,%.2f,%s,%s",
-                runId, autoTimer.seconds(), autonomousState, cameraSees), "tag log");
-    }
-
-    // Adds one line to a CSV file on the Control Hub (with the header if the file is new).
-    void appendRow(File file, String header, String row, String what) {
-        try {
-            File dir = file.getParentFile();
-            if (dir != null && !dir.exists() && !dir.mkdirs()) {
-                logProblem = "can't create " + dir;
-                return;
-            }
-            boolean isNew = !file.exists();
-            try (FileWriter w = new FileWriter(file, true)) {
-                if (isNew) {
-                    w.write(header + "\n");
-                }
-                w.write(row + "\n");
-            }
-            logProblem = null;
-        } catch (IOException e) {
-            logProblem = what + ": " + e.getMessage();
-        }
-    }
-
-    // The steps so far, one line each, so the drive team can read the whole match on the Driver Hub.
-    void addStepTelemetry() {
-        for (int i = 0; i < stepHistory.size(); i++) {
-            telemetry.addData("Step " + (i + 1), stepHistory.get(i));
-        }
-        if (logProblem != null) {
-            telemetry.addData("Log NOT saved", logProblem);
-        }
-    }
-
-    /**
-     * The AprilTag decision: turns the robot toward the up CELL.
-     * @return true when the robot points at the up CELL (within AprilTagVision.AIM_TOLERANCE_DEG),
-     * when the camera is switched off, or when FIND_TIMEOUT_SECONDS has run out. While no up CELL
-     * is in view it holds still and returns false; the AIM case then switches to SEARCH.
+     * AIM: turns the robot toward the up CELL.
+     * @return true when the robot points at the up CELL, when the camera is switched off, or when
+     * FIND_TIMEOUT_SECONDS has run out. While no up CELL is in view it holds still and returns false;
+     * the AIM case then switches to SEARCH.
      */
     boolean aim() {
         if (!vision.isEnabled() || findTimer.seconds() > FIND_TIMEOUT_SECONDS) {
             return true;  // no camera, or out of time: launch from here
         }
-        AprilTagDetection tag = vision.closestTag();
-        if (tag == null) {
+        AprilTagDetection cell = vision.closestTag();
+        if (cell == null) {
             drive.stop();
             return false;
         }
-        if (vision.isAimedAt(tag)) {
-            drive.stop();
-            return true;
-        }
-        // Turn in place toward the up CELL: the same rule as the TeleOp's left bumper.
-        drive.drive(0, 0, vision.aimTurn(tag.ftcPose.bearing));
-        return false;
+        return drive.turnToCell(vision, cell);
     }
 
     /**
-     * Looks for the up CELL by turning in place: to SEARCH_ANGLE_DEG left of the start heading,
-     * then to SEARCH_ANGLE_DEG right, then left again, until the camera sees it.
+     * SEARCH: looks for the up CELL by turning in place: to SEARCH_ANGLE_DEG left of the start
+     * heading, then to SEARCH_ANGLE_DEG right, then left again, until the camera sees it.
      * @return true when the up CELL is in view, or, after FIND_TIMEOUT_SECONDS, once the robot has
      * turned back to its start heading (so it never launches from the middle of a sweep).
      */
     boolean search() {
         if (findTimer.seconds() > FIND_TIMEOUT_SECONDS) {
             // Turn back to the start heading, but never for longer than TURN_BACK_TIMEOUT_SECONDS.
-            return turnToward(startHeadingDeg)
+            return drive.turnToHeading(startHeadingDeg, SEARCH_TURN_POWER)
                     || findTimer.seconds() > FIND_TIMEOUT_SECONDS + TURN_BACK_TIMEOUT_SECONDS;
         }
         if (vision.closestTag() != null) {
             return true;
         }
-        if (turnToward(searchTargetDeg)) {
+        if (drive.turnToHeading(searchTargetDeg, SEARCH_TURN_POWER)) {
             // Reached one side: sweep to the other side.
             searchTargetDeg = searchTargetDeg > startHeadingDeg
                     ? startHeadingDeg - SEARCH_ANGLE_DEG : startHeadingDeg + SEARCH_ANGLE_DEG;
@@ -571,48 +450,24 @@ public class BioBuzzStarterBotAuto extends OpMode
     }
 
     /**
-     * Remembers where the robot launches from, for the "Launched" telemetry line: which CELL it
-     * aimed at, how far it turned from its start heading (+ = left), and where odometry says it is.
-     * The cluster name gives the HIVE end on both alliances: SCORING = far CELL, AUDIENCE = audience CELL.
-     * Example: "RED SCORING (far CELL), turned 15° left, at (0.3, -0.1) in".
-     */
-    void recordLaunchSpot() {
-        AprilTagClusterDetection cell = vision.closestTag();
-        String target;
-        if (!vision.isEnabled()) {
-            target = "camera off";
-        } else if (cell == null) {
-            target = "no up CELL found";
-        } else {
-            String name = cell.metadata.shortName;
-            target = name + (name.contains("SCORING") ? " (far CELL)" : " (audience CELL)");
-        }
-        double turned = AngleUnit.normalizeDegrees(drive.getPoseHeadingDeg() - startHeadingDeg);
-        launchSpot = String.format(Locale.US, "%s, turned %.0f° %s, at (%.1f, %.1f) in", target,
-                Math.abs(turned), turned >= 0 ? "left" : "right", drive.getPoseX(), drive.getPoseY());
-    }
-
-    /**
-     * Drives to the park spot (PARK_FORWARD_IN, PARK_LEFT_IN from where the robot stood at INIT).
-     * First it turns back to the start heading, then every loop it asks odometry where the robot
-     * really is, works out how far the spot is ahead and to the left, and drives straight at it,
-     * slower as it gets close. So it does not matter where AIM and SEARCH left the robot.
-     * @return true when the robot is within PARK_TOLERANCE_IN of the spot, or after
-     * PARK_TIMEOUT_SECONDS (it then stops wherever it is).
+     * PARK: first turns back to the start heading, then drives to the park spot (PARK_FORWARD_IN,
+     * PARK_LEFT_IN from where the robot stood at INIT). Odometry says where the robot really is, so
+     * it does not matter where AIM and SEARCH left it.
+     * @return true at the park spot, or after PARK_TIMEOUT_SECONDS (it then stops wherever it is).
      */
     boolean park() {
         if (stepTimer.seconds() > PARK_TIMEOUT_SECONDS) {
             return true;
         }
         if (!parkFacingStart) {
-            parkFacingStart = turnToward(startHeadingDeg);
+            parkFacingStart = drive.turnToHeading(startHeadingDeg, SEARCH_TURN_POWER);
             return false;
         }
-        return driveToward(PARK_FORWARD_IN, PARK_LEFT_IN);
+        return goTo(PARK_FORWARD_IN, PARK_LEFT_IN);
     }
 
     /**
-     * Drives to the LOOK spot in two straight legs, forward then right, so the robot is off the
+     * LOOK: drives to the LOOK spot in two straight legs, forward then right, so the robot is off the
      * wall (and clear of the FLOWER beside it) before it moves sideways.
      * @return true at the LOOK spot, or after LOOK_TIMEOUT_SECONDS (AIM then starts from wherever it is).
      */
@@ -621,13 +476,13 @@ public class BioBuzzStarterBotAuto extends OpMode
             return true;
         }
         if (lookLeg == 0) {
-            if (driveToward(LOOK_FORWARD_IN, 0)) {
+            if (goTo(LOOK_FORWARD_IN, 0)) {
                 lookLeg = 1;
             }
             return false;
         }
         // right = minus "left"; the other LOOK spot is the same distance to the left.
-        return driveToward(LOOK_FORWARD_IN, lookingOtherSide ? LOOK_RIGHT_IN : -LOOK_RIGHT_IN);
+        return goTo(LOOK_FORWARD_IN, lookingOtherSide ? LOOK_RIGHT_IN : -LOOK_RIGHT_IN);
     }
 
     double lookTimeoutSeconds() {
@@ -653,52 +508,17 @@ public class BioBuzzStarterBotAuto extends OpMode
     }
 
     /**
-     * One loop of driving straight at a spot, measured from where the robot stood at INIT
-     * (inches forward, inches to the left), while holding the start heading. Every loop it asks
-     * odometry where the robot really is, so it does not matter how it got there.
-     * @return true when the robot is within PARK_TOLERANCE_IN of the spot.
+     * One loop of driving to a spot (inches forward, inches to the left of where the robot stood at
+     * INIT), facing the start heading and never more than MAX_FORWARD_IN forward (the own-side guard).
+     * The first time in a step that the guard holds the robot back, it says so in the step log.
+     * @return true at the spot.
      */
-    boolean driveToward(double forwardIn, double leftIn) {
-        // How far the spot still is, in the INIT directions (x forward, y left)...
-        double dx = forwardIn - drive.getPoseX();
-        double dy = leftIn - drive.getPoseY();
-        // Own-side guard: at MAX_FORWARD_IN, no more driving toward the middle of the FIELD.
-        if (drive.getPoseX() >= MAX_FORWARD_IN && dx > 0) {
-            dx = 0;
-            if (!ownSideLimitLogged) {
-                ownSideLimitLogged = true;
-                logStep(autonomousState.name(), autonomousState.name(), "own-side limit (G402)");
-            }
+    boolean goTo(double forwardIn, double leftIn) {
+        boolean there = drive.driveToPoint(forwardIn, leftIn, startHeadingDeg, MAX_FORWARD_IN);
+        if (drive.hitForwardLimit() && !ownSideLimitLogged) {
+            ownSideLimitLogged = true;
+            log.step(autonomousState.name(), autonomousState.name(), "own-side limit (G402)");
         }
-        double distance = Math.hypot(dx, dy);
-        if (distance < PARK_TOLERANCE_IN) {
-            drive.stop();
-            return true;
-        }
-        // ...turned into the robot's own directions, using the heading it has now.
-        double h = Math.toRadians(drive.getPoseHeadingDeg());
-        double ahead = dx * Math.cos(h) + dy * Math.sin(h);
-        double toLeft = -dx * Math.sin(h) + dy * Math.cos(h);
-        // Power grows with the distance left, between PARK_MIN_POWER and PARK_MAX_POWER.
-        double power = Range.clip(PARK_GAIN * distance, PARK_MIN_POWER, PARK_MAX_POWER);
-        double headingError = startHeadingDeg - drive.getPoseHeadingDeg();
-        // In drive(), + strafe goes right and + rotate turns right, so "left" needs a minus sign.
-        drive.drive(power * ahead / distance, -power * toLeft / distance, -PARK_HEADING_GAIN * headingError);
-        return false;
-    }
-
-    /**
-     * Turns in place at SEARCH_TURN_POWER toward a heading (degrees, + = left).
-     * @return true when the robot is within HEADING_TOLERANCE_DEG of it.
-     */
-    boolean turnToward(double targetDeg) {
-        double error = AngleUnit.normalizeDegrees(targetDeg - drive.getPoseHeadingDeg());
-        if (Math.abs(error) < HEADING_TOLERANCE_DEG) {
-            drive.stop();
-            return true;
-        }
-        // + error means turn left, but in drive() a + rotate turns right, so we flip the sign.
-        drive.drive(0, 0, error > 0 ? -SEARCH_TURN_POWER : SEARCH_TURN_POWER);
-        return false;
+        return there;
     }
 }

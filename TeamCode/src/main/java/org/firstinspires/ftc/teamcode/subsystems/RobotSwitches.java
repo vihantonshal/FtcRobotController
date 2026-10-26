@@ -13,6 +13,11 @@ package org.firstinspires.ftc.teamcode.subsystems;
  *                true = Limelight 3A "limelight" (see AprilTagVision for its setup)
  *  USE_DASHBOARD FTC Dashboard: live graphs, camera picture and live number changes.
  *                Set to false for competition; telemetry then goes only to the Driver Station.
+ *  USE_LAUNCH_ASSIST  TeleOp only: launch log, saving good launch poses (operator B) and
+ *                auto-align to them (driver right bumper)                    (LaunchAssist)
+ *  USE_FIELD_CENTRIC  TeleOp only: false = always robot-centric (stick up = the robot's front),
+ *                and the driver's Y button does nothing. true = Y switches field-centric on/off
+ *                (needs the "imu"), and FIELD_CENTRIC_AT_START picks the mode at INIT.
  */
 public final class RobotSwitches {
     public static final boolean USE_INTAKE = true;
@@ -20,6 +25,8 @@ public final class RobotSwitches {
     public static final boolean USE_CAMERA = true;
     public static final boolean USE_LIMELIGHT = false;
     public static final boolean USE_DASHBOARD = true;
+    public static final boolean USE_LAUNCH_ASSIST = true;
+    public static final boolean USE_FIELD_CENTRIC = false;
 
     private RobotSwitches() {
     }

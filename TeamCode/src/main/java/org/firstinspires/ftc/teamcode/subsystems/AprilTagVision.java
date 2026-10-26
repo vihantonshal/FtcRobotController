@@ -1,5 +1,7 @@
 package org.firstinspires.ftc.teamcode.subsystems;
 
+import android.util.Size;
+
 import com.acmerobotics.dashboard.FtcDashboard;
 import com.acmerobotics.dashboard.config.Config;
 import com.qualcomm.hardware.limelightvision.LLResult;
@@ -10,6 +12,8 @@ import com.qualcomm.robotcore.util.Range;
 
 import org.firstinspires.ftc.robotcore.external.Telemetry;
 import org.firstinspires.ftc.robotcore.external.hardware.camera.WebcamName;
+import org.firstinspires.ftc.robotcore.external.hardware.camera.controls.ExposureControl;
+import org.firstinspires.ftc.robotcore.external.hardware.camera.controls.GainControl;
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.Pose3D;
@@ -25,11 +29,14 @@ import org.firstinspires.ftc.vision.apriltag.AprilTagPoseFtc;
 import org.firstinspires.ftc.vision.apriltag.AprilTagProcessor;
 import org.firstinspires.ftc.vision.apriltag.AprilTagSingleDetection;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /*
  * The webcam and the BIOBUZZ HIVE AprilTags, using SDK 12's tag clusters.
@@ -44,8 +51,17 @@ import java.util.Map;
  *
  *  - closestTag(): the UP CELL to launch into (metadata.shortName = its name), or null
  *  - cellHeightInches(): how high a CELL opening is above the TILES
- *  - aimTurn(bearing): the turn power that points the robot at it
+ *  - aimTurn(bearing): the turn power that points the robot at it; pass launcherBearing(cell) so
+ *    the launcher, not the camera, ends up pointing at the opening (LAUNCHER_OFFSET_* below)
  *  - streams the camera picture to FTC Dashboard (http://192.168.43.1:8080/dash)
+ *
+ * Making the Logitech C270 webcam reliable (details at "Webcam picture settings" below):
+ *  - 640x480 pictures, the only size the SDK has a lens calibration for;
+ *  - DECIMATION 2 instead of the SDK's 3, so the tags are found farther away;
+ *  - a short manual exposure (EXPOSURE_MS, GAIN), so the picture doesn't smear while turning;
+ *  - CELLS from a picture older than MAX_RESULT_AGE_MS count as not seen (a stalled camera);
+ *  - each CELL's range is averaged over RANGE_AVERAGE_FRAMES pictures, for a steadier flywheel speed.
+ * The "Camera" telemetry line shows what the camera actually got.
  *
  * Which CELL is up: each HIVE is a see-saw with two CELLS (red HIVE: RED SCORING + RED AUDIENCE,
  * blue HIVE: BLUE SCORING + BLUE AUDIENCE), and the up CELL's opening is the higher one.
@@ -55,7 +71,12 @@ import java.util.Map;
  * closestTag() returns null, so we never aim at the down CELL.
  *
  * Bearing is in degrees. Positive bearing means the CELL opening is to the robot's LEFT.
- * It does not check the alliance.
+ *
+ * ALLIANCE FILTER (optional): setAlliance(RED or BLUE) makes closestTag() and aimedUpCell() return
+ * only that alliance's HIVE, so aiming, the flywheel speed and LaunchAssist never pick the other HIVE.
+ * Until it is set (and in the Auto, which never sets it) any HIVE counts. The TeleOp uses
+ * aimedUpCell(): without an alliance it takes the up CELL the robot points at, so it follows the
+ * driver's aim. upCellSummary() tells the drive team which CELL of their HIVE is tilted up.
  *
  * LIMELIGHT 3A instead of the webcam: set RobotSwitches.USE_LIMELIGHT = true. Everything above stays
  * the same for the Auto and the TeleOp. The Limelight finds the tags itself (one result per tag, with
@@ -89,17 +110,97 @@ public class AprilTagVision {
      * above the TILES, and how far the camera is tilted up from level (the HIVE is high, so the
      * camera looks up). Same numbers as BioBuzzAutoAprilTag.
      */
-    public static double CAMERA_HEIGHT_IN = 12.0;
-    public static double CAMERA_PITCH_DEG = 30.0;
+    // Planned Logitech C270 mount (Camera Mount C270 Clip Front - Launcher Channel, beside the +X launcher
+    // channel, looking FORWARD like the v6 shot). Lens 12.6 in above the TILES. Re-measure on the built robot.
+    // 38 degrees up (was 45): the CELL's tag row is about 49.7 in above the TILES, 37.1 in above the lens.
+    // From the closest launch spot (NEAR_RANGE_IN, tags ~30 in away along the floor) the camera looks up
+    // atan(37.1 / 30) = 51 degrees, from the farthest (FAR_RANGE_IN, ~79 in) atan(37.1 / 79) = 25 degrees.
+    // Halfway, (51 + 25) / 2 = 38, keeps both inside the C270's 32.5 degree tall picture with ~3 degrees to
+    // spare at each edge; at 45 the picture's bottom edge is 29 degrees, so the far spot was out of view.
+    // Any tilt from about 36 to 40 works (docs/vision-deck, slide 9). The mount must really be tilted 38:
+    // measure it, and re-save the launch poses after re-tilting.
+    public static double CAMERA_HEIGHT_IN = 12.6;
+    public static double CAMERA_PITCH_DEG = 38.0;
+
+    /*
+     * Where the launcher's line of fire is, seen from the camera lens, so aiming points the LAUNCHER
+     * (not the camera) at the CELL opening. Measure on the robot, looking the way the ball flies:
+     * LAUNCHER_OFFSET_RIGHT_IN = how far the launcher wheel's center line is to the RIGHT of the lens
+     * (negative = left), LAUNCHER_OFFSET_FORWARD_IN = how far the ball's release point is in front of
+     * the lens (negative = behind). 0, 0 = the camera sits on the launcher's line of fire.
+     * The camera must look the same way the ball flies (in CAD the Julia Runway v6 throws toward the
+     * robot's FRONT, the intake side): if it looks the other way, aiming turns the launcher away from the HIVE.
+     */
+    // Front C270 mount (Camera Mount C270 Clip Front): looking forward, the launcher is 140 mm to the
+    // RIGHT of the lens and the v6 release point 52 mm (2.0 in) BEHIND it.
+    // (Back-launch Runway v5 with the rear clip mount was -5.5 / 0.4.)
+    public static double LAUNCHER_OFFSET_RIGHT_IN = 5.5;
+    public static double LAUNCHER_OFFSET_FORWARD_IN = -2.0;
     /*
      * When only one CELL of a HIVE is in view, it counts as up only above this height. The up CELL's
      * opening is about 53.5-65.6 in. above the TILES. Check it on a real field: read the "height"
      * telemetry with the HIVE tipped each way, and set this halfway between the two readings.
      */
     public static double UP_CELL_MIN_HEIGHT_IN = 45.0;
+    // aimedUpCell(): two up CELLS less than this many degrees apart count as the same direction.
+    public static double SAME_DIRECTION_DEG = 5.0;
+
+    /*
+     * ---- Webcam picture settings (Logitech C270; not used with the Limelight) ----
+     * Background: docs/vision-deck (slides "C270 camera" and "Better software").
+     *
+     * PICTURE SIZE is fixed at 640x480 (CAMERA_RESOLUTION below). The SDK has a built-in lens
+     * calibration for the C270 at that size ONLY. Range and height come from the calibration, so at
+     * any other size (e.g. 1280x720) every distance would be wrong. Don't change it.
+     *
+     * DECIMATION: the tag finder first looks for squares in a smaller copy of the picture, DECIMATION
+     * times smaller each way. Bigger = faster but sees less far. The SDK default is 3, which finds our
+     * 3.25 in tags to only about 6.5 ft, right at the far edge of what our 45-degree camera can see.
+     * 2 reaches about 9.75 ft at about 22 pictures a second (SDK sample ConceptAprilTag, 2 in tag
+     * distances scaled by 3.25 / 2). Check "Camera ... fps" on the Driver Hub after changing it.
+     *
+     * EXPOSURE: with automatic exposure the C270 keeps its shutter open a long time under venue
+     * lights, so the picture smears while the robot turns and the tags are lost just when we aim.
+     * MANUAL_EXPOSURE = true uses a short EXPOSURE_MS and makes up the brightness with GAIN.
+     * ⚠️ 6 ms / gain 250 are starting points, not measured on our camera. Find ours with the SDK sample
+     * "Optimize AprilTag Exposure" (copy ConceptAprilTagOptimizeExposure into TeamCode, remove
+     * @Disabled): the SHORTEST exposure that still finds the tags, with the gain high. Both are clipped
+     * to what the camera allows. MANUAL_EXPOSURE = false gives the camera back its automatic exposure.
+     * All four values can be changed live in FTC Dashboard; applyCameraSettings() sends a change to
+     * the camera within a loop or two (same idea as the subsystems' sendPidfIfChanged()).
+     */
+    public static int DECIMATION = 2;
+    public static boolean MANUAL_EXPOSURE = true;
+    public static int EXPOSURE_MS = 6;
+    public static int GAIN = 250;
+
+    /*
+     * OLD PICTURES: getDetections() hands back the result of the last picture it finished. If the
+     * camera stalls (loose USB cable, static), that result never changes, and the robot would keep
+     * aiming at an angle that is no longer true. A CELL seen in a picture older than
+     * MAX_RESULT_AGE_MS counts as not seen. At 22 pictures a second a new one comes every ~45 ms and
+     * the tag finder needs about as long again, so 200 ms means "several pictures in a row missing".
+     * 0 = never drop (the old behaviour). The Limelight has its own: LIMELIGHT_MAX_STALENESS_MS.
+     */
+    public static double MAX_RESULT_AGE_MS = 200;
+
+    /*
+     * STEADIER RANGE: the bearing from a tag is very exact, but its range wobbles by an inch or two,
+     * more the farther away it is, and the flywheel speed is picked from the range. So each CELL's
+     * ftcPose.range is the average over its last RANGE_AVERAGE_FRAMES pictures (1 = no averaging).
+     * Only the range is averaged: bearing, x, y, z and yaw stay as measured, so aiming stays quick.
+     * The average starts over when the CELL was out of view for RANGE_RESET_MS, or when a new range
+     * is more than RANGE_JUMP_IN away from the average (the HIVE tipped, or we drove fast), because
+     * averaging across a jump would give a distance that was never true.
+     */
+    public static int RANGE_AVERAGE_FRAMES = 4;
+    public static double RANGE_RESET_MS = 300;
+    public static double RANGE_JUMP_IN = 6.0;
 
     // Must match the webcam's name in the Driver Hub configuration.
     public static final String WEBCAM_NAME = "Webcam 1";
+    // The only size with a built-in C270 calibration (see "Webcam picture settings" above).
+    private static final Size CAMERA_RESOLUTION = new Size(640, 480);
 
     // Limelight 3A (RobotSwitches.USE_LIMELIGHT): its configuration name, its AprilTag pipeline, and
     // how old (ms) a Limelight result may be before it counts as "nothing seen".
@@ -107,8 +208,12 @@ public class AprilTagVision {
     public static int LIMELIGHT_PIPELINE = 0;
     public static double LIMELIGHT_MAX_STALENESS_MS = 100;
 
-    private final boolean enabled = RobotSwitches.USE_CAMERA;
-    private final boolean useLimelight = RobotSwitches.USE_CAMERA && RobotSwitches.USE_LIMELIGHT;
+    // Which alliance's HIVE closestTag() may return; null = any (see ALLIANCE FILTER at the top).
+    public enum Alliance { RED, BLUE }
+    private Alliance alliance = null;
+
+    private final boolean enabled;
+    private final boolean useLimelight;
     private VisionPortal visionPortal;
     private AprilTagProcessor aprilTag;
     private Limelight3A limelight;
@@ -117,7 +222,33 @@ public class AprilTagVision {
     private final Map<String, String> limelightIds = new LinkedHashMap<>();
     private final StringBuilder limelightOtherTags = new StringBuilder();
 
+    // What applyCameraSettings() last sent to the camera, so it only sends a CHANGE.
+    private int sentDecimation = -1;
+    private Boolean sentManualExposure = null;   // null = nothing sent yet
+    private int sentExposureMs = -1;
+    private int sentGain = -1;
+    private long manualModeSetAtNs = 0;          // when we switched the camera to manual exposure
+    private String cameraSettingsText = "waiting for the camera";
+
+    // Range averaging (RANGE_AVERAGE_FRAMES), one history per CELL name.
+    private static class RangeHistory {
+        final ArrayDeque<Double> ranges = new ArrayDeque<>();
+        long lastFrameNs;   // frameAcquisitionNanoTime of the newest range in the history
+    }
+    private final Map<String, RangeHistory> rangeHistories = new HashMap<>();
+
     public AprilTagVision(HardwareMap hardwareMap) {
+        this(hardwareMap, true);
+    }
+
+    /*
+     * useCamera = false switches the camera off for one OpMode only (e.g. a launcher test): no camera
+     * is looked for, and every method acts as if nothing is in view. RobotSwitches.USE_CAMERA = false
+     * still switches it off for every OpMode.
+     */
+    public AprilTagVision(HardwareMap hardwareMap, boolean useCamera) {
+        enabled = RobotSwitches.USE_CAMERA && useCamera;
+        useLimelight = enabled && RobotSwitches.USE_LIMELIGHT;
         if (!enabled) {
             return;
         }
@@ -136,8 +267,12 @@ public class AprilTagVision {
 
         visionPortal = new VisionPortal.Builder()
                 .setCamera(hardwareMap.get(WebcamName.class, WEBCAM_NAME))
+                .setCameraResolution(CAMERA_RESOLUTION)   // 640x480: the C270's calibrated size
                 .addProcessor(aprilTag)
                 .build();
+        // Decimation can be set right away. Exposure and gain must wait until the camera is
+        // streaming, which takes a second or two, so applyCameraSettings() finishes them later.
+        applyCameraSettings();
 
         // Show the camera picture on FTC Dashboard, at most 10 pictures per second.
         if (RobotSwitches.USE_DASHBOARD) {
@@ -158,11 +293,104 @@ public class AprilTagVision {
         List<AprilTagClusterDetection> cells = visibleCells();
         AprilTagClusterDetection best = null;
         for (AprilTagClusterDetection cell : cells) {
+            if (alliance != null && !hive(cell).equals(alliance.name())) {
+                continue;   // the other alliance's HIVE
+            }
             if (isUp(cell, cells) && (best == null || cell.ftcPose.range < best.ftcPose.range)) {
                 best = cell;
             }
         }
         return best;
+    }
+
+    /*
+     * For the TeleOp: the up CELL the robot is POINTED at (smallest bearing), so the target is the one
+     * the driver aims at, not just the nearest. Only our HIVE when setAlliance() was used. Two CELLS
+     * within SAME_DIRECTION_DEG of each other are in about the same direction (from one side the other
+     * HIVE's CELL can sit right behind ours): then the nearer one wins.
+     */
+    public AprilTagClusterDetection aimedUpCell() {
+        List<AprilTagClusterDetection> cells = visibleCells();
+        AprilTagClusterDetection best = null;
+        for (AprilTagClusterDetection cell : cells) {
+            if (alliance != null && !hive(cell).equals(alliance.name())) {
+                continue;   // the other alliance's HIVE
+            }
+            if (!isUp(cell, cells)) {
+                continue;
+            }
+            if (best == null) {
+                best = cell;
+                continue;
+            }
+            double off = Math.abs(cell.ftcPose.bearing);
+            double bestOff = Math.abs(best.ftcPose.bearing);
+            boolean sameDirection = Math.abs(off - bestOff) <= SAME_DIRECTION_DEG;
+            if (sameDirection ? cell.ftcPose.range < best.ftcPose.range : off < bestOff) {
+                best = cell;
+            }
+        }
+        return best;
+    }
+
+    // Only this alliance's HIVE counts from now on; null = any HIVE again.
+    public void setAlliance(Alliance alliance) {
+        this.alliance = alliance;
+    }
+
+    public Alliance getAlliance() {
+        return alliance;
+    }
+
+    /*
+     * Which CELL of our HIVE is tilted up, for the drive team, e.g. "RED AUDIENCE, your RIGHT
+     * (audience end)". Left and right are as seen from behind our ALLIANCE wall. Taken from an up CELL
+     * of our HIVE in view, or, when only our down CELL is in view, the other CELL of the HIVE.
+     */
+    public String upCellSummary() {
+        if (!enabled) {
+            return "camera off";
+        }
+        if (alliance == null) {
+            return "alliance not set";
+        }
+        List<AprilTagClusterDetection> cells = visibleCells();
+        String up = null;
+        boolean fromDownCell = false;
+        for (AprilTagClusterDetection cell : cells) {
+            if (!hive(cell).equals(alliance.name())) {
+                continue;
+            }
+            String name = cell.metadata.shortName;
+            if (isUp(cell, cells)) {
+                up = name;
+                fromDownCell = false;
+                break;
+            }
+            up = otherCell(name);
+            fromDownCell = true;
+        }
+        if (up == null) {
+            return "our HIVE not in view";
+        }
+        return String.format(Locale.US, "%s, your %s (%s end)%s", up, driverSide(up),
+                up.contains("SCORING") ? "far" : "audience", fromDownCell ? ", seen from the down CELL" : "");
+    }
+
+    // The other CELL of the same HIVE: RED SCORING <-> RED AUDIENCE, BLUE SCORING <-> BLUE AUDIENCE.
+    private static String otherCell(String name) {
+        return name.contains("SCORING") ? name.replace("SCORING", "AUDIENCE") : name.replace("AUDIENCE", "SCORING");
+    }
+
+    /*
+     * LEFT or RIGHT for a driver behind that alliance's wall. SCORING is the far-end CELL (BioBuzzField):
+     * red drivers see the far end on their left; the field is turned 180 degrees for blue, so blue
+     * drivers see it on their right.
+     */
+    private static String driverSide(String name) {
+        boolean farEnd = name.contains("SCORING");
+        boolean red = name.startsWith("RED");
+        return farEnd == red ? "LEFT" : "RIGHT";
     }
 
     /*
@@ -200,24 +428,159 @@ public class AprilTagVision {
         if (useLimelight) {
             return limelightCells();
         }
+        // Every OpMode asks for CELLS every loop (also in init_loop), so this is where a camera
+        // setting changed in FTC Dashboard, or still waiting for the camera to start, gets sent.
+        applyCameraSettings();
         List<AprilTagDetection> detections = aprilTag.getDetections();
         if (detections == null) {
             return cells;
         }
+        long now = System.nanoTime();
         for (AprilTagDetection detection : detections) {
             if (detection instanceof AprilTagClusterDetection) {
                 AprilTagClusterDetection cell = (AprilTagClusterDetection) detection;
-                if (cell.metadata != null && cell.ftcPose != null) {
-                    cells.add(cell);
+                if (cell.metadata != null && cell.ftcPose != null && !isTooOld(cell, now)) {
+                    cells.add(withAveragedRange(cell, now));
                 }
             }
         }
         return cells;
     }
 
-    // True when the target is straight ahead: less than AIM_TOLERANCE_DEG to either side.
+    /*
+     * OLD PICTURES (MAX_RESULT_AGE_MS): frameAcquisitionNanoTime is when the camera took the picture,
+     * on the same System.nanoTime() clock as `now`, so now - frame time is the result's age.
+     */
+    private static boolean isTooOld(AprilTagDetection cell, long now) {
+        if (MAX_RESULT_AGE_MS <= 0) {
+            return false;
+        }
+        double ageMs = (now - cell.frameAcquisitionNanoTime) / 1e6;
+        return ageMs > MAX_RESULT_AGE_MS;
+    }
+
+    /*
+     * STEADIER RANGE (RANGE_AVERAGE_FRAMES): the same CELL, with ftcPose.range replaced by the average
+     * of its last few pictures. visibleCells() runs several times per loop and the camera is slower
+     * than the loop, so a range is added only for a NEW picture (a new frameAcquisitionNanoTime);
+     * otherwise the same picture would be counted many times. The SDK's pose is read-only, so we make
+     * a new pose and a new CELL result with everything else copied unchanged.
+     */
+    private AprilTagClusterDetection withAveragedRange(AprilTagClusterDetection cell, long now) {
+        String name = cell.metadata.shortName;
+        RangeHistory history = rangeHistories.get(name);
+        if (history == null) {
+            history = new RangeHistory();
+            rangeHistories.put(name, history);
+        }
+        double raw = cell.ftcPose.range;
+        if (cell.frameAcquisitionNanoTime != history.lastFrameNs) {
+            // Start over after a gap, or when the range jumped (tip, fast drive): see RANGE_RESET_MS.
+            boolean gap = (cell.frameAcquisitionNanoTime - history.lastFrameNs) / 1e6 > RANGE_RESET_MS;
+            boolean jump = !history.ranges.isEmpty() && Math.abs(raw - average(history.ranges)) > RANGE_JUMP_IN;
+            if (gap || jump) {
+                history.ranges.clear();
+            }
+            history.ranges.addLast(raw);
+            while (history.ranges.size() > Math.max(1, RANGE_AVERAGE_FRAMES)) {
+                history.ranges.removeFirst();   // keep only the newest RANGE_AVERAGE_FRAMES
+            }
+            history.lastFrameNs = cell.frameAcquisitionNanoTime;
+        }
+        double range = average(history.ranges);
+        if (range == raw) {
+            return cell;   // one picture so far (or RANGE_AVERAGE_FRAMES = 1): nothing to change
+        }
+        AprilTagPoseFtc p = cell.ftcPose;
+        AprilTagPoseFtc pose = new AprilTagPoseFtc(p.x, p.y, p.z, p.yaw, p.pitch, p.roll, range, p.bearing, p.elevation);
+        return new AprilTagClusterDetection(cell.percentClusterFound, cell.metadata, cell.distanceUnit,
+                pose, cell.rawPose, cell.robotPose, cell.frameAcquisitionNanoTime);
+    }
+
+    private static double average(ArrayDeque<Double> values) {
+        double sum = 0;
+        for (double v : values) {
+            sum += v;
+        }
+        return values.isEmpty() ? 0 : sum / values.size();
+    }
+
+    /*
+     * Sends DECIMATION, MANUAL_EXPOSURE, EXPOSURE_MS and GAIN to the webcam, but only when one of them
+     * changed since the last time (like the subsystems' sendPidfIfChanged()). It never waits: our
+     * OpModes are iterative, and sleep() in a loop would freeze the robot. Instead each step that
+     * isn't possible yet returns, and the next loop tries again:
+     *  1. Decimation goes to the tag finder, which works from the start.
+     *  2. Exposure and gain are camera (USB) controls, which only work once the camera is STREAMING,
+     *     a second or two after INIT.
+     *  3. The camera needs a moment after switching to manual exposure before it takes an exposure
+     *     time (the SDK sample sleeps 50 ms there), so we switch first and send the time 50 ms later.
+     */
+    private void applyCameraSettings() {
+        if (DECIMATION != sentDecimation) {
+            aprilTag.setDecimation(Math.max(1, DECIMATION));
+            sentDecimation = DECIMATION;
+        }
+        if (visionPortal.getCameraState() != VisionPortal.CameraState.STREAMING) {
+            return;   // step 2: try again next loop
+        }
+        boolean unchanged = sentManualExposure != null && sentManualExposure == MANUAL_EXPOSURE
+                && (!MANUAL_EXPOSURE || (sentExposureMs == EXPOSURE_MS && sentGain == GAIN));
+        if (unchanged) {
+            return;
+        }
+        ExposureControl exposure = visionPortal.getCameraControl(ExposureControl.class);
+        GainControl gain = visionPortal.getCameraControl(GainControl.class);
+        if (exposure == null) {
+            cameraSettingsText = "this camera has no exposure control";
+            sentManualExposure = MANUAL_EXPOSURE;   // nothing to send; don't ask again every loop
+            return;
+        }
+        if (!MANUAL_EXPOSURE) {
+            // Back to automatic: the Logitech webcams call their automatic mode "AperturePriority".
+            exposure.setMode(exposure.isModeSupported(ExposureControl.Mode.AperturePriority)
+                    ? ExposureControl.Mode.AperturePriority : ExposureControl.Mode.Auto);
+            sentManualExposure = false;
+            cameraSettingsText = "automatic exposure";
+            return;
+        }
+        if (exposure.getMode() != ExposureControl.Mode.Manual) {
+            exposure.setMode(ExposureControl.Mode.Manual);   // step 3: the time goes in 50 ms from now
+            manualModeSetAtNs = System.nanoTime();
+            return;
+        }
+        if ((System.nanoTime() - manualModeSetAtNs) / 1e6 < 50) {
+            return;
+        }
+        // Clip to what this camera allows, so a typo in Dashboard can't send something it refuses.
+        long ms = Math.max(exposure.getMinExposure(TimeUnit.MILLISECONDS),
+                Math.min(exposure.getMaxExposure(TimeUnit.MILLISECONDS), EXPOSURE_MS));
+        exposure.setExposure(ms, TimeUnit.MILLISECONDS);
+        int g = GAIN;
+        if (gain != null) {
+            g = Range.clip(GAIN, gain.getMinGain(), gain.getMaxGain());
+            gain.setGain(g);
+        }
+        sentManualExposure = true;
+        sentExposureMs = EXPOSURE_MS;
+        sentGain = GAIN;
+        cameraSettingsText = String.format(Locale.US, "manual exposure %d ms, gain %d", ms, g);
+    }
+
+    // True when the launcher points at the target: less than AIM_TOLERANCE_DEG to either side.
     public boolean isAimedAt(AprilTagDetection tag) {
-        return tag != null && tag.ftcPose != null && Math.abs(tag.ftcPose.bearing) < AIM_TOLERANCE_DEG;
+        return tag != null && tag.ftcPose != null && Math.abs(launcherBearing(tag)) < AIM_TOLERANCE_DEG;
+    }
+
+    /*
+     * The bearing from the LAUNCHER to the target, in degrees (positive = left, like ftcPose.bearing).
+     * It is the camera's bearing moved by LAUNCHER_OFFSET_RIGHT_IN / LAUNCHER_OFFSET_FORWARD_IN; with
+     * both 0 it is exactly ftcPose.bearing. ftcPose.x is to the right of the lens, ftcPose.y forward.
+     */
+    public double launcherBearing(AprilTagDetection tag) {
+        double right = tag.ftcPose.x - LAUNCHER_OFFSET_RIGHT_IN;
+        double forward = tag.ftcPose.y - LAUNCHER_OFFSET_FORWARD_IN;
+        return Math.toDegrees(Math.atan2(-right, forward));
     }
 
     /*
@@ -242,7 +605,12 @@ public class AprilTagVision {
                     limelight.isConnected() ? "connected" : "NOT CONNECTED (check USB and the configuration name)");
             telemetry.addData("Limelight tag size", "%.1f mm (set this in the pipeline)", limelightTagSizeMm());
         }
-        List<AprilTagClusterDetection> cells = visibleCells();
+        List<AprilTagClusterDetection> cells = visibleCells();   // also sends camera settings (webcam)
+        if (!useLimelight) {
+            // Check here that the settings arrived: fps drops if DECIMATION is too low for the hub.
+            telemetry.addData("Camera", "%dx%d, %.0f fps, decimation %d, %s", CAMERA_RESOLUTION.getWidth(),
+                    CAMERA_RESOLUTION.getHeight(), visionPortal.getFps(), sentDecimation, cameraSettingsText);
+        }
         if (cells.isEmpty()) {
             telemetry.addData("HIVE tags", "none seen");
             return;

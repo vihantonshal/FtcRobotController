@@ -29,6 +29,8 @@ public class IntakeSubsystem {
     // Starting values from the FTC guide; measure the real top speed with BioBuzzMotorMaxSpeed.
     public static PIDFCoefficients PIDF = new PIDFCoefficients(1.17, 0.117, 0, 11.7);   // p, i, d, f
     public static double MAX_TICKS_PER_SEC = 2500;
+    // TeleOp: extra intake power while the windmill feeds, to push stuck balls along.
+    public static double FEED_HELP_POWER = 0.5;
 
     private final boolean enabled = RobotSwitches.USE_INTAKE;
     private DcMotorEx intake;
@@ -75,6 +77,23 @@ public class IntakeSubsystem {
         double servo = Range.clip(servoPower, -1, 1);
         leftServo.setPower(servo);
         rightServo.setPower(servo);
+    }
+
+    /*
+     * TeleOp, once per loop: power from the operator's triggers (-1 to 1, + = in). While the launcher
+     * feeds, FEED_HELP_POWER is added; run() keeps the power inside -1..1.
+     */
+    public void runTeleop(double power, boolean launcherFeeding) {
+        if (launcherFeeding) {
+            power += FEED_HELP_POWER;
+        }
+        run(power, power);
+    }
+
+    // Auto, once per loop: only the roller helps, at FEED_HELP_POWER while the launcher feeds; the
+    // corner servos stay still.
+    public void helpFeed(boolean launcherFeeding) {
+        run(launcherFeeding ? FEED_HELP_POWER : 0, 0);
     }
 
     // Sends PIDF to the motor when a number changed (in FTC Dashboard), not every loop.

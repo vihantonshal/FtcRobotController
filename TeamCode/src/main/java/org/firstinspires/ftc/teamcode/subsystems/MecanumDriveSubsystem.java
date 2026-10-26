@@ -6,21 +6,27 @@ import com.acmerobotics.dashboard.config.Config;
 import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
+import com.qualcomm.robotcore.hardware.Gamepad;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.hardware.PIDFCoefficients;
 import com.qualcomm.robotcore.hardware.IMU;
 import com.qualcomm.robotcore.util.ElapsedTime;
+import com.qualcomm.robotcore.util.Range;
 
 import org.firstinspires.ftc.robotcore.external.Telemetry;
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
+import org.firstinspires.ftc.vision.apriltag.AprilTagDetection;
 
 /*
  * The four-wheel mecanum drive (goBILDA GripForce 104 mm wheels, 5203-2402-0019 motors, 312 RPM).
  * Mount the wheels so the rollers form an "X" when you look down on the robot from above.
  *
- * TeleOp: drive(forward, strafe, rotate) every loop, or driveFieldCentric(...), which uses the
- *         Control Hub's built-in IMU so "stick up" always means "away from the driver".
+ * TeleOp: driveWithSticks(driver) every loop drives with the driver's sticks, with the driver-feel
+ *         numbers below (deadband, slow mode, smooth speed-up). It is ROBOT-CENTRIC: "stick up" means
+ *         the way the robot's front faces (the TeleOp's default). Field-centric ("stick up" = away
+ *         from the driver, with the Control Hub's built-in IMU) only when RobotSwitches.USE_FIELD_CENTRIC.
+ *         driveToward(...) is for auto-align. drive(forward, strafe, rotate) is the plain mecanum formula.
  * Auto:   driveDistance(), strafeDistance(), rotateAngle() return true when the move is done;
  *         call resetEncoders() between moves so each one counts from 0.
  *
@@ -48,6 +54,31 @@ public class MecanumDriveSubsystem {
     public static double STRAFE_MULTIPLIER = 1.0;
     // A move counts as done when the front-left wheel is this close to its target.
     public static double TOLERANCE_MM = 10;
+
+    // ---- Auto: driving to a spot with odometry (driveToPoint) and turning (turnToHeading) ----
+    // driveToPoint() drives straight at the spot, slower as it gets close: GOTO_GAIN power per inch
+    // still to go, never below GOTO_MIN_POWER (enough to keep moving when close) or above GOTO_MAX_POWER.
+    public static double GOTO_TOLERANCE_IN = 1.5;    // "there" when this close
+    public static double GOTO_MAX_POWER = 0.4;
+    public static double GOTO_MIN_POWER = 0.1;
+    public static double GOTO_GAIN = 0.05;
+    public static double GOTO_HEADING_GAIN = 0.01;   // turn power per degree, to keep the heading
+    // turnToHeading() is "there" when the heading is this close.
+    public static double HEADING_TOLERANCE_DEG = 3;
+
+    // ---- Driver feel, TeleOp only (owner: drive team) ----
+    // Stick values smaller than this count as 0, so a stick that doesn't center perfectly
+    // doesn't make the robot creep.
+    public static double DEADBAND = 0.05;
+    // Slow mode multiplies every drive command by this (0.4 = 40% speed).
+    public static double SLOW_MODE_SCALE = 0.4;
+    // How fast a drive command may change, per second. 4 means 0 to full speed in 0.25 s:
+    // smooth enough that the robot doesn't jerk or tip, quick enough to feel direct.
+    public static double MAX_ACCEL_PER_SEC = 4.0;
+    // false: robot-centric, stick up = the way the robot's front faces (the team's choice).
+    // true: start in field-centric mode when the IMU is found (stick up = away from the driver).
+    // Only used when RobotSwitches.USE_FIELD_CENTRIC is true.
+    public static boolean FIELD_CENTRIC_AT_START = false;
 
     /*
      * How the Control Hub is mounted, for the built-in IMU (field-centric driving, and the Auto's
@@ -89,6 +120,14 @@ public class MecanumDriveSubsystem {
     // Field-centric "forward" is set by resetHeading(); odometry keeps its own heading.
     private double headingOffsetDeg = 0;
 
+    // TeleOp: the modes the driver switches, the smoothed drive commands, and the time between them.
+    private boolean slowMode = false;
+    private boolean fieldCentric = false;
+    private double forwardCmd = 0, strafeCmd = 0, rotateCmd = 0;
+    private final ElapsedTime smoothTimer = new ElapsedTime();
+    // Auto: true when the last driveToPoint() was stopped from driving further forward.
+    private boolean forwardLimited = false;
+
     public MecanumDriveSubsystem(HardwareMap hardwareMap) {
         leftFront = hardwareMap.get(DcMotorEx.class, "front_left_motor");
         rightFront = hardwareMap.get(DcMotorEx.class, "front_right_motor");
@@ -122,7 +161,150 @@ public class MecanumDriveSubsystem {
             imu.initialize(new IMU.Parameters(new RevHubOrientationOnRobot(HUB_LOGO, HUB_USB)));
             imu.resetYaw();
         }
+        fieldCentric = RobotSwitches.USE_FIELD_CENTRIC && FIELD_CENTRIC_AT_START && imu != null;
     }
+
+    // ---------------- TeleOp driving ----------------
+
+    // Call at START, so the first smooth step counts from START and not from INIT.
+    public void startTeleop() {
+        smoothTimer.reset();
+    }
+
+    // Driver X: slow mode on/off (for lining up).
+    public void toggleSlowMode() {
+        slowMode = !slowMode;
+    }
+
+    // Driver Y: field-centric on/off. Does nothing unless RobotSwitches.USE_FIELD_CENTRIC is true
+    // and the IMU was found.
+    public void toggleFieldCentric() {
+        if (RobotSwitches.USE_FIELD_CENTRIC && imu != null) {
+            fieldCentric = !fieldCentric;
+        }
+    }
+
+    // How the robot drives now, for telemetry: "robot-centric, SLOW" and so on.
+    public String getModeText() {
+        String mode = fieldCentric ? "field-centric" : (imu != null ? "robot-centric" : "robot-centric (no IMU)");
+        return mode + (slowMode ? ", SLOW" : "");
+    }
+
+    // Call once per loop: left stick drives and strafes, right stick X turns.
+    public void driveWithSticks(Gamepad driver) {
+        driveWithSticks(driver, deadband(driver.right_stick_x));
+    }
+
+    /*
+     * The same, but the robot turns with "turn" instead of the right stick (for example to aim at
+     * the CELL). Moving the left stick forward gives a negative number on most gamepads, so we flip it.
+     */
+    public void driveWithSticks(Gamepad driver, double turn) {
+        double forward = deadband(-driver.left_stick_y);
+        double strafe = deadband(driver.left_stick_x);
+        double scale = slowMode ? SLOW_MODE_SCALE : 1;
+        driveSmoothly(forward * scale, strafe * scale, turn * scale, fieldCentric);
+    }
+
+    // Call once per loop instead of driveWithSticks() for commands that don't come from the sticks
+    // (auto-align): always robot-centric, never slowed down.
+    public void driveToward(double forward, double strafe, double rotate) {
+        driveSmoothly(forward, strafe, rotate, false);
+    }
+
+    // Each command moves toward what was asked by at most MAX_ACCEL_PER_SEC per second, so the robot
+    // speeds up and slows down gently. A slow loop counts as at most 0.1 s, so it can't cause a jump.
+    private void driveSmoothly(double forward, double strafe, double rotate, boolean useFieldCentric) {
+        double dt = Math.min(smoothTimer.seconds(), 0.1);
+        smoothTimer.reset();
+        double step = MAX_ACCEL_PER_SEC * dt;
+        forwardCmd = approach(forwardCmd, forward, step);
+        strafeCmd = approach(strafeCmd, strafe, step);
+        rotateCmd = approach(rotateCmd, rotate, step);
+        if (useFieldCentric) {
+            driveFieldCentric(forwardCmd, strafeCmd, rotateCmd);
+        } else {
+            drive(forwardCmd, strafeCmd, rotateCmd);
+        }
+    }
+
+    // Stick values smaller than DEADBAND count as 0.
+    private static double deadband(double value) {
+        return Math.abs(value) < DEADBAND ? 0 : value;
+    }
+
+    // Move "current" toward "target" by at most "step".
+    private static double approach(double current, double target, double step) {
+        return current + Range.clip(target - current, -step, step);
+    }
+
+    // ---------------- Auto: drive to a spot, turn to a heading, turn to a CELL ----------------
+
+    /*
+     * One loop of driving straight at a spot, measured from where the robot stood at INIT (inches
+     * forward, inches to the left), while holding headingDeg. Every loop it asks odometry where the
+     * robot really is, so it does not matter how it got there. It never drives further forward than
+     * maxForwardIn (it may still slide sideways or back up); hitForwardLimit() says when that held it back.
+     * Returns true when the robot is within GOTO_TOLERANCE_IN of the spot.
+     */
+    public boolean driveToPoint(double forwardIn, double leftIn, double headingDeg, double maxForwardIn) {
+        // How far the spot still is, in the INIT directions (x forward, y left)...
+        double dx = forwardIn - poseX;
+        double dy = leftIn - poseY;
+        forwardLimited = poseX >= maxForwardIn && dx > 0;
+        if (forwardLimited) {
+            dx = 0;
+        }
+        double distance = Math.hypot(dx, dy);
+        if (distance < GOTO_TOLERANCE_IN) {
+            stop();
+            return true;
+        }
+        // ...turned into the robot's own directions, using the heading it has now.
+        double h = Math.toRadians(getPoseHeadingDeg());
+        double ahead = dx * Math.cos(h) + dy * Math.sin(h);
+        double toLeft = -dx * Math.sin(h) + dy * Math.cos(h);
+        double power = Range.clip(GOTO_GAIN * distance, GOTO_MIN_POWER, GOTO_MAX_POWER);
+        double headingError = headingDeg - getPoseHeadingDeg();
+        // In drive(), + strafe goes right and + rotate turns right, so "left" needs a minus sign.
+        drive(power * ahead / distance, -power * toLeft / distance, -GOTO_HEADING_GAIN * headingError);
+        return false;
+    }
+
+    // True when the last driveToPoint() was held back by its maxForwardIn.
+    public boolean hitForwardLimit() {
+        return forwardLimited;
+    }
+
+    /*
+     * One loop of turning in place at "power" toward a heading (degrees since INIT, + = left).
+     * Returns true when the robot is within HEADING_TOLERANCE_DEG of it.
+     */
+    public boolean turnToHeading(double targetDeg, double power) {
+        double error = AngleUnit.normalizeDegrees(targetDeg - getPoseHeadingDeg());
+        if (Math.abs(error) < HEADING_TOLERANCE_DEG) {
+            stop();
+            return true;
+        }
+        // + error means turn left, but in drive() a + rotate turns right, so we flip the sign.
+        drive(0, 0, error > 0 ? -power : power);
+        return false;
+    }
+
+    /*
+     * One loop of turning in place so the LAUNCHER points at the CELL the camera sees (the same rule
+     * as the TeleOp's left bumper). Returns true when it does (within AprilTagVision.AIM_TOLERANCE_DEG).
+     */
+    public boolean turnToCell(AprilTagVision vision, AprilTagDetection cell) {
+        if (vision.isAimedAt(cell)) {
+            stop();
+            return true;
+        }
+        drive(0, 0, vision.aimTurn(vision.launcherBearing(cell)));
+        return false;
+    }
+
+    // ---------------- Heading and odometry ----------------
 
     // True when the IMU was found, so field-centric driving works.
     public boolean hasImu() {
@@ -224,8 +406,8 @@ public class MecanumDriveSubsystem {
     }
 
     /*
-     * Drive with three "powers" from -1 to 1: forward (+ = forward), strafe (+ = right),
-     * rotate (+ = turn right). This is the mecanum formula.
+     * Robot-centric driving with three "powers" from -1 to 1: forward (+ = toward the robot's front),
+     * strafe (+ = the robot's right), rotate (+ = turn right). This is the mecanum formula.
      */
     public void drive(double forward, double strafe, double rotate) {
         double leftFrontPower = forward + strafe + rotate;
