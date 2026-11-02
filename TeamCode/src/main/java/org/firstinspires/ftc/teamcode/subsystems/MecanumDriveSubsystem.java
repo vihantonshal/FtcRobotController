@@ -70,7 +70,11 @@ public class MecanumDriveSubsystem {
     // Stick values smaller than this count as 0, so a stick that doesn't center perfectly
     // doesn't make the robot creep.
     public static double DEADBAND = 0.05;
-    // Slow mode multiplies every drive command by this (0.4 = 40% speed).
+    // TeleOp top speed: full stick = this share of MAX_TICKS_PER_SEC (0.7 = about 42 in/s instead of 60).
+    // The wheels' PIDF holds it on any battery. Only the driver's sticks: the Autos and auto-align
+    // (driveToward) keep their own speeds. 1.0 = full speed, as before.
+    public static double TELEOP_SPEED_SCALE = 0.7;
+    // Slow mode multiplies every drive command by this (0.4 = 40% speed), instead of TELEOP_SPEED_SCALE.
     public static double SLOW_MODE_SCALE = 0.4;
     // How fast a drive command may change, per second. 4 means 0 to full speed in 0.25 s:
     // smooth enough that the robot doesn't jerk or tip, quick enough to feel direct.
@@ -95,6 +99,9 @@ public class MecanumDriveSubsystem {
     public static RevHubOrientationOnRobot.UsbFacingDirection HUB_USB =
             RevHubOrientationOnRobot.UsbFacingDirection.FORWARD;
 
+    // RobotSwitches.USE_DRIVE: when false the motors are never looked up, nothing moves, and every
+    // Auto move (driveDistance, driveToPoint, turnToHeading, turnToCell...) counts as done at once.
+    private final boolean enabled = RobotSwitches.USE_DRIVE;
     private final DcMotorEx leftFront;
     private final DcMotorEx rightFront;
     private final DcMotorEx leftBack;
@@ -128,11 +135,31 @@ public class MecanumDriveSubsystem {
     // Auto: true when the last driveToPoint() was stopped from driving further forward.
     private boolean forwardLimited = false;
 
+    // The drive motor named `name`, or else `otherName`; neither in the configuration = a clear error.
+    private static DcMotorEx motor(HardwareMap hardwareMap, String name, String otherName) {
+        DcMotorEx m = hardwareMap.tryGet(DcMotorEx.class, name);
+        if (m == null) {
+            m = hardwareMap.tryGet(DcMotorEx.class, otherName);
+        }
+        if (m == null) {
+            throw new IllegalArgumentException("No drive motor named \"" + name + "\" or \"" + otherName
+                    + "\" in the ACTIVE configuration. Its motors are: " + hardwareMap.getAllNames(DcMotor.class));
+        }
+        return m;
+    }
+
     public MecanumDriveSubsystem(HardwareMap hardwareMap) {
-        leftFront = hardwareMap.get(DcMotorEx.class, "front_left_motor");
-        rightFront = hardwareMap.get(DcMotorEx.class, "front_right_motor");
-        leftBack = hardwareMap.get(DcMotorEx.class, "back_left_motor");
-        rightBack = hardwareMap.get(DcMotorEx.class, "back_right_motor");
+        if (!enabled) {
+            leftFront = rightFront = leftBack = rightBack = null;
+            motors = new DcMotorEx[0];
+            imu = null;
+            return;
+        }
+        // Either naming works: ours (also the simulator's) or goBILDA's (leftFrontDrive, ...).
+        leftFront = motor(hardwareMap, "front_left_motor", "leftFrontDrive");
+        rightFront = motor(hardwareMap, "front_right_motor", "rightFrontDrive");
+        leftBack = motor(hardwareMap, "back_left_motor", "leftBackDrive");
+        rightBack = motor(hardwareMap, "back_right_motor", "rightBackDrive");
         motors = new DcMotorEx[]{leftFront, rightFront, leftBack, rightBack};
 
         /*
@@ -202,7 +229,8 @@ public class MecanumDriveSubsystem {
     public void driveWithSticks(Gamepad driver, double turn) {
         double forward = deadband(-driver.left_stick_y);
         double strafe = deadband(driver.left_stick_x);
-        double scale = slowMode ? SLOW_MODE_SCALE : 1;
+        // Slow mode is never faster than the normal TeleOp speed.
+        double scale = slowMode ? Math.min(SLOW_MODE_SCALE, TELEOP_SPEED_SCALE) : TELEOP_SPEED_SCALE;
         driveSmoothly(forward * scale, strafe * scale, turn * scale, fieldCentric);
     }
 
@@ -248,6 +276,9 @@ public class MecanumDriveSubsystem {
      * Returns true when the robot is within GOTO_TOLERANCE_IN of the spot.
      */
     public boolean driveToPoint(double forwardIn, double leftIn, double headingDeg, double maxForwardIn) {
+        if (!enabled) {
+            return true;
+        }
         // How far the spot still is, in the INIT directions (x forward, y left)...
         double dx = forwardIn - poseX;
         double dy = leftIn - poseY;
@@ -281,6 +312,9 @@ public class MecanumDriveSubsystem {
      * Returns true when the robot is within HEADING_TOLERANCE_DEG of it.
      */
     public boolean turnToHeading(double targetDeg, double power) {
+        if (!enabled) {
+            return true;
+        }
         double error = AngleUnit.normalizeDegrees(targetDeg - getPoseHeadingDeg());
         if (Math.abs(error) < HEADING_TOLERANCE_DEG) {
             stop();
@@ -296,6 +330,9 @@ public class MecanumDriveSubsystem {
      * as the TeleOp's left bumper). Returns true when it does (within AprilTagVision.AIM_TOLERANCE_DEG).
      */
     public boolean turnToCell(AprilTagVision vision, AprilTagDetection cell) {
+        if (!enabled) {
+            return true;
+        }
         if (vision.isAimedAt(cell)) {
             stop();
             return true;
@@ -348,6 +385,9 @@ public class MecanumDriveSubsystem {
      * Then turn that robot move into field x and y using the heading.
      */
     private void updatePose() {
+        if (!enabled) {
+            return;
+        }
         int[] now = {leftFront.getCurrentPosition(), rightFront.getCurrentPosition(),
                 leftBack.getCurrentPosition(), rightBack.getCurrentPosition()};
         double ticksPerInch = ticksPerMm() * 25.4;
@@ -483,6 +523,9 @@ public class MecanumDriveSubsystem {
 
     // Sends each wheel to its own target position, all at the same speed (0-1 of MAX_TICKS_PER_SEC).
     private void runToPositions(double speed, double lf, double rf, double lb, double rb) {
+        if (!enabled) {
+            return;
+        }
         leftFront.setTargetPosition((int) lf);
         rightFront.setTargetPosition((int) rf);
         leftBack.setTargetPosition((int) lb);
@@ -495,6 +538,9 @@ public class MecanumDriveSubsystem {
 
     // True once the front-left wheel has stayed within TOLERANCE_MM of its target for holdSeconds.
     private boolean heldAt(double frontLeftTarget, double holdSeconds) {
+        if (!enabled) {
+            return true;
+        }
         if (Math.abs(frontLeftTarget - leftFront.getCurrentPosition()) > TOLERANCE_MM * ticksPerMm()) {
             holdTimer.reset();
         }
@@ -506,10 +552,27 @@ public class MecanumDriveSubsystem {
         rightFrontTarget = rf;
         leftBackTarget = lb;
         rightBackTarget = rb;
+        if (!enabled) {
+            return;
+        }
         leftFront.setVelocity(lf);
         rightFront.setVelocity(rf);
         leftBack.setVelocity(lb);
         rightBack.setVelocity(rb);
+    }
+
+    // RobotSwitches.USE_DRIVE: false = no motors, nothing moves.
+    public boolean isEnabled() {
+        return enabled;
+    }
+
+    // Real speed of each wheel in ticks/s: front left, front right, back left, back right (0s when off).
+    public double[] getWheelVelocities() {
+        if (!enabled) {
+            return new double[4];
+        }
+        return new double[]{leftFront.getVelocity(), rightFront.getVelocity(),
+                leftBack.getVelocity(), rightBack.getVelocity()};
     }
 
     /*
@@ -518,6 +581,10 @@ public class MecanumDriveSubsystem {
      * to spot a loose encoder, a reversed encoder or a wheel that rubs.
      */
     public void addTelemetry(Telemetry telemetry) {
+        if (!enabled) {
+            telemetry.addData("Drive", "OFF (RobotSwitches.USE_DRIVE = false)");
+            return;
+        }
         telemetry.addData("front left velocity", leftFront.getVelocity());
         telemetry.addData("front right velocity", rightFront.getVelocity());
         telemetry.addData("back left velocity", leftBack.getVelocity());
@@ -532,6 +599,9 @@ public class MecanumDriveSubsystem {
 
     // Wheel positions, for the Auto's distance moves.
     public void addPositionTelemetry(Telemetry telemetry) {
+        if (!enabled) {
+            return;
+        }
         telemetry.addData("Motor Current Positions", "LF (%d), RF (%d), LB (%d), RB (%d)",
                 leftFront.getCurrentPosition(), rightFront.getCurrentPosition(),
                 leftBack.getCurrentPosition(), rightBack.getCurrentPosition());

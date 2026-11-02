@@ -25,6 +25,8 @@ import java.util.Locale;
  * The windmill only feeds once the launcher is within FEED_MARGIN of its target speed, so every ball
  * gets a good throw.
  *
+ * RUNWAY v10 (70 degree exit): USE_DISTANCE_SPEED is OFF and the launcher runs at one speed,
+ * TARGET_VELOCITY x SPEED_SCALE, plus the operator's trim. The rest of this paragraph is for a 77 degree runway.
  * DISTANCE-BASED SPEED: a farther CELL needs a faster flywheel. Every loop the OpMode passes the
  * distance to the up CELL from the camera (webcam or Limelight) to setCellRange(). The target speed
  * then follows a straight line through two measured points, NEAR (NEAR_RANGE_IN, NEAR_VELOCITY) and
@@ -53,34 +55,39 @@ import java.util.Locale;
 public class LauncherSubsystem {
     // ---- Tuning numbers (owner: launcher team) ----
     public static PIDFCoefficients PIDF = new PIDFCoefficients(40, 0, 0, 12.5);   // p, i, d, f
-    public static double TARGET_VELOCITY = 1381;   // about 2959 RPM (= NEAR_VELOCITY); used until the camera sees a CELL
+    // Runway v10 (70 degree exit): ONE speed for the whole shooting zone (see "Octave launcher check" below).
+    // About 2526 RPM. With USE_DISTANCE_SPEED = true it is only used until the camera sees a CELL.
+    public static double TARGET_VELOCITY = 1179;
     public static double FEED_MARGIN = 25;         // feed only above (target - this), e.g. 1225 for 1250
     public static double WINDMILL_POWER = 1.0;
     // The feed wheel (CR servo "feedWheel" beside the Runway lead-in) runs whenever the windmill does.
     // Seen from above it must turn clockwise so it pushes the ball toward the launcher: -1.0 if it turns the wrong way.
     public static double FEED_WHEEL_POWER = 1.0;
     // Distance-based speed (see the top of this file). Ranges in inches, speeds in ticks/s.
-    public static boolean USE_DISTANCE_SPEED = true;
+    // OFF for Runway v10: at 70 degrees the right speed hardly changes with distance. NEAR/FAR are the
+    // Runway v6 (77 degree) line: set true again only with a 77 degree runway on the robot.
+    public static boolean USE_DISTANCE_SPEED = false;
     public static double NEAR_RANGE_IN = 54.4;     // about 0.75 m along the floor (see the top of this file)
     public static double NEAR_VELOCITY = 1381;     // starting point from the simulation (v6 front launch), not measured yet
     public static double FAR_RANGE_IN = 89.9;      // about 2 m along the floor
     public static double FAR_VELOCITY = 1994;      // starting point from the simulation (v6 front launch), not measured yet
     public static double TRIM_STEP = 25;           // ticks/s per operator D-pad press
     /*
-     * Octave launcher check (2026-10-25, v3: 96 mm Hogback drives the ball, Runway v6 77 degree exit).
-     * SPEED_SCALE multiplies every distance-based speed and TARGET_VELOCITY. Keep 1.0 until one shot is
-     * filmed: NEAR/FAR match the check if the ball leaves at 0.375 x the Hogback tread speed; at 0.45 x
-     * the speeds should be about 0.83 x these.
-     * ZONE_MIN/MAX_RANGE_IN: all 4 POLLEN scored with the robot front 9-33 in from the HIVE stand. In the
-     * SDK's ftcPose.range (hypot(x, y): it leaves out the camera's z) that is about 47.7-66.5 in with the
-     * camera tilted 38 degrees, 50.0-66.9 in at 45. FAR_RANGE_IN is beyond that and was not checked.
+     * Octave launcher check (2026-10-26, v4: 96 mm Hogback drives the ball, Runway v10 70 degree exit).
+     * TARGET_VELOCITY 1179 scored all 4 POLLEN from the robot front about 12-32 in from the HIVE stand
+     * (tape measure from the intake wheels; best spot about 15 in), window 1148-1210 (+/-2.7%).
+     * SPEED_SCALE multiplies TARGET_VELOCITY and every distance-based speed. 1179 assumes the ball leaves
+     * at 0.45 x the Hogback tread speed: film one shot at 1179 (the model says 18.75 ft/s) and set
+     * SPEED_SCALE = 18.75 / measured ft/s (1.2 if it leaves at 0.375 x, the older estimate).
+     * ZONE_MIN/MAX_RANGE_IN: that zone in the SDK's ftcPose.range (hypot(x, y): it leaves out the
+     * camera's z), about 51.0-66.7 in with the camera tilted 38 degrees, 52.9-67.0 in at 45.
      * FEED_MAX_OVER: also don't feed above (target + this), e.g. right after a spin-up overshoot,
-     * because a too-fast ball flies long (the check's speed window is about +/-55 ticks/s).
+     * because a too-fast ball flies long. 30 = the one-speed window; FEED_MARGIN is the low side.
      */
     public static double SPEED_SCALE = 1.0;
-    public static double ZONE_MIN_RANGE_IN = 47.5;
+    public static double ZONE_MIN_RANGE_IN = 51;
     public static double ZONE_MAX_RANGE_IN = 67;
-    public static double FEED_MAX_OVER = 50;
+    public static double FEED_MAX_OVER = 30;
     /*
      * SMOOTH MODE (new LauncherSubsystem(hardwareMap, true), used by the tank TeleOp): our own speed
      * control instead of the hub's PIDF, for a flywheel that jerks with the hub's control.
@@ -112,8 +119,10 @@ public class LauncherSubsystem {
 
     private final boolean enabled = RobotSwitches.USE_LAUNCHER;
     private DcMotorEx launcher;
-    private CRServo windmill;
+    //private CRServo windmill;
     private CRServo feedWheel;   // null when the configuration has no "feedWheel"
+    private DcMotorEx roller;
+
     private boolean feeding = false;
     // The PIDF numbers the motor has now (NaN = never sent), and the speed it was last asked for.
     private final PIDFCoefficients sentPidf = new PIDFCoefficients(Double.NaN, Double.NaN, Double.NaN, Double.NaN);
@@ -150,11 +159,19 @@ public class LauncherSubsystem {
         if (!enabled) {
             return;
         }
-        launcher = hardwareMap.get(DcMotorEx.class, "launcher");
+        launcher = hardwareMap.tryGet(DcMotorEx.class, "launcher");
+        if (launcher == null) {
+            throw new IllegalArgumentException("No motor named \"launcher\" in the ACTIVE configuration. Its motors are: "
+                    + hardwareMap.getAllNames(DcMotor.class) + " (rename one to launcher, or set RobotSwitches.USE_LAUNCHER = false)");
+        }
         // The mecanum robot's configuration calls it "windmillServo", the tank robot's "windmill".
+        // Neither in the configuration = no windmill: the launcher still spins, feeding moves nothing.
         CRServo found = hardwareMap.tryGet(CRServo.class, "windmillServo");
-        windmill = found != null ? found : hardwareMap.get(CRServo.class, "windmill");
+        //windmill = found != null ? found : hardwareMap.tryGet(CRServo.class, "windmill");
+        roller = hardwareMap.get(DcMotorEx.class, "roller");
+        roller.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
         feedWheel = hardwareMap.tryGet(CRServo.class, "feedWheel");
+
 
         if (smooth) {
             // We set the power ourselves; the encoder still counts and getVelocity() still works.
@@ -167,12 +184,21 @@ public class LauncherSubsystem {
         }
 
         setFeedPower(false);
-        windmill.setDirection(DcMotorSimple.Direction.REVERSE);
+        if (roller != null) {
+
+            //windmill.setDirection(DcMotorSimple.Direction.REVERSE);
+            roller.setDirection(DcMotorSimple.Direction.REVERSE);
+
+        }
     }
 
     // The windmill and the feed wheel feed together.
     private void setFeedPower(boolean feed) {
-        windmill.setPower(feed ? WINDMILL_POWER : 0);
+        //if (windmill != null) {
+          //  windmill.setPower(feed ? WINDMILL_POWER : 0);
+        roller.setPower(feed ? 1 : 0);
+
+
         if (feedWheel != null) {
             feedWheel.setPower(feed ? FEED_WHEEL_POWER : 0);
         }
@@ -184,8 +210,11 @@ public class LauncherSubsystem {
 
     // Which way the windmill turns (REVERSE by default). For a robot whose windmill is mounted the other way.
     public void setWindmillDirection(DcMotorSimple.Direction direction) {
-        if (enabled) {
-            windmill.setDirection(direction);
+        if (enabled && roller  != null) {
+
+            //windmill.setDirection(direction);
+            roller.setDirection(direction);
+
         }
     }
 
@@ -266,6 +295,9 @@ public class LauncherSubsystem {
         if (on && "REVERSE".equals(getDirection())) {
             telemetry.addLine("WARNING: the flywheel spins BACKWARD");
         }
+        telemetry.addData("Roller is On", roller.getPower());
+        telemetry.addData("Roller velocity", roller.getVelocity());
+
     }
 
     // The flywheel speed for a CELL this far away: the straight line through NEAR and FAR, held at the

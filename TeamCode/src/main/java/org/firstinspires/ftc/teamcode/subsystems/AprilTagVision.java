@@ -9,6 +9,7 @@ import com.qualcomm.hardware.limelightvision.LLResultTypes;
 import com.qualcomm.hardware.limelightvision.Limelight3A;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.util.Range;
+import com.qualcomm.robotcore.util.RobotLog;
 
 import org.firstinspires.ftc.robotcore.external.Telemetry;
 import org.firstinspires.ftc.robotcore.external.hardware.camera.WebcamName;
@@ -199,6 +200,15 @@ public class AprilTagVision {
 
     // Must match the webcam's name in the Driver Hub configuration.
     public static final String WEBCAM_NAME = "Webcam 1";
+    /*
+     * Our own lens calibration (fx, fy, cx, cy in pixels), for CAMERA_RESOLUTION. false = the SDK's
+     * built-in C270 calibration for 640x480 (fx = fy = 822.3, cx = 319.5, cy = 242.5).
+     * Off: the values below were measured at a different resolution (cx/cy should be near 320/240 at
+     * 640x480), so with them every range read about half the real distance (433 / 822 = 0.53).
+     * Recalibrate at 640x480 before turning it back on. Can be changed in Dashboard; read at INIT.
+     */
+    public static boolean USE_LENS_INTRINSICS = false;
+    public static double LENS_FX = 433.137, LENS_FY = 433.137, LENS_CX = 422.08, LENS_CY = 354.865;
     // The only size with a built-in C270 calibration (see "Webcam picture settings" above).
     private static final Size CAMERA_RESOLUTION = new Size(640, 480);
 
@@ -213,9 +223,13 @@ public class AprilTagVision {
     private Alliance alliance = null;
 
     private final boolean enabled;
+    // Was the camera found in the hardware configuration? Shown at INIT and written to the hub's log.
+    private String hardwareStatus = "off (RobotSwitches.USE_CAMERA = false)";
     private final boolean useLimelight;
     private VisionPortal visionPortal;
-    private AprilTagProcessor aprilTag;
+    private AprilTagProcessor aprilTag;   // null in plain camera mode
+    // Plain camera mode (Camera Test): picture only, no AprilTag processor, no exposure settings.
+    private final boolean plain;
     private Limelight3A limelight;
     private final AprilTagLibrary library = AprilTagGameDatabase.getBioBuzzTagLibrary();
     // From the last Limelight result: each CELL's tag IDs ("34 35"), and tags that belong to no CELL.
@@ -247,7 +261,37 @@ public class AprilTagVision {
      * still switches it off for every OpMode.
      */
     public AprilTagVision(HardwareMap hardwareMap, boolean useCamera) {
-        enabled = RobotSwitches.USE_CAMERA && useCamera;
+        this(hardwareMap, useCamera, false);
+    }
+
+    /*
+     * plainCamera = true: only the webcam picture (live view on the HDMI monitor and FTC Dashboard), like
+     * the SDK's UtilityCameraFrameCapture: no AprilTag processor and no exposure / gain settings, so
+     * nothing is ever seen. For Camera Test, to tell a camera problem from a processor or settings problem.
+     */
+    public AprilTagVision(HardwareMap hardwareMap, boolean useCamera, boolean plainCamera) {
+        plain = plainCamera;
+        boolean on = RobotSwitches.USE_CAMERA && useCamera;
+        WebcamName webcam = null;
+        if (on && RobotSwitches.USE_LIMELIGHT) {
+            hardwareStatus = "Limelight 3A \"" + LIMELIGHT_NAME + "\"";
+        } else if (on) {
+            // tryGet() gives null instead of crashing, so a missing webcam is reported, not an error.
+            webcam = hardwareMap.tryGet(WebcamName.class, WEBCAM_NAME);
+            if (webcam == null) {
+                hardwareStatus = "NOT FOUND: no webcam named \"" + WEBCAM_NAME + "\" in the active configuration";
+                on = false;
+            } else if (!webcam.isAttached()) {
+                hardwareStatus = "\"" + WEBCAM_NAME + "\" is in the configuration but NOT PLUGGED IN (blue USB 3.0 port)";
+                on = false;
+            } else {
+                hardwareStatus = "found \"" + WEBCAM_NAME + "\", plugged in";
+            }
+        } else if (RobotSwitches.USE_CAMERA) {
+            hardwareStatus = "off for this OpMode";
+        }
+        RobotLog.ii("AprilTagVision", "camera hardware: %s", hardwareStatus);
+        enabled = on;
         useLimelight = enabled && RobotSwitches.USE_LIMELIGHT;
         if (!enabled) {
             return;
@@ -258,15 +302,29 @@ public class AprilTagVision {
             limelight.start();   // no results at all until start() is called
             return;
         }
+        if (plain) {
+            visionPortal = new VisionPortal.Builder()
+                    .setCamera(webcam)
+                    .setCameraResolution(CAMERA_RESOLUTION)
+                    .build();
+            cameraSettingsText = "PLAIN camera: no AprilTag processor, no exposure settings";
+            if (RobotSwitches.USE_DASHBOARD) {
+                FtcDashboard.getInstance().startCameraStream(visionPortal, 10);
+            }
+            return;
+        }
         // SDK 12 ships the BIOBUZZ tags as four clusters, with each tag's size and place in its cluster.
-        aprilTag = new AprilTagProcessor.Builder()
+        AprilTagProcessor.Builder builder = new AprilTagProcessor.Builder()
                 .setTagFamily(AprilTagProcessor.TagFamily.TAG_36h11)
                 .setTagLibrary(AprilTagGameDatabase.getBioBuzzTagLibrary())
-                .setOutputUnits(DistanceUnit.INCH, AngleUnit.DEGREES)
-                .build();
+                .setOutputUnits(DistanceUnit.INCH, AngleUnit.DEGREES);
+        if (USE_LENS_INTRINSICS) {
+            builder.setLensIntrinsics(LENS_FX, LENS_FY, LENS_CX, LENS_CY);
+        }
+        aprilTag = builder.build();
 
         visionPortal = new VisionPortal.Builder()
-                .setCamera(hardwareMap.get(WebcamName.class, WEBCAM_NAME))
+                .setCamera(webcam)
                 .setCameraResolution(CAMERA_RESOLUTION)   // 640x480: the C270's calibrated size
                 .addProcessor(aprilTag)
                 .build();
@@ -278,6 +336,11 @@ public class AprilTagVision {
         if (RobotSwitches.USE_DASHBOARD) {
             FtcDashboard.getInstance().startCameraStream(visionPortal, 10);
         }
+    }
+
+    // "found "Webcam 1", plugged in", "NOT FOUND: ..." and so on, from INIT.
+    public String hardwareStatus() {
+        return hardwareStatus;
     }
 
     public boolean isEnabled() {
@@ -403,6 +466,31 @@ public class AprilTagVision {
         return CAMERA_HEIGHT_IN + cell.ftcPose.y * Math.sin(pitch) + cell.ftcPose.z * Math.cos(pitch);
     }
 
+    /*
+     * Intake (the robot's front) to the HIVE stand, from the camera: range minus STAND_OFFSET_IN. The
+     * offset is the lens behind the intake plus the CELL opening set back inside the HIVE (CAD and
+     * simulation: range 54.2 in with the front 15 in from the stand). Only right when the robot faces
+     * the CELL square. Check once: tape-measure intake to stand, then STAND_OFFSET_IN = range - tape.
+     */
+    public static double STAND_OFFSET_IN = 39.2;
+
+    public double intakeToStandInches(AprilTagDetection cell) {
+        return cell.ftcPose.range - STAND_OFFSET_IN;
+    }
+
+    // One Driver Hub line with what the camera reads for this CELL (null = none in view).
+    public void addReadingLine(Telemetry telemetry, AprilTagClusterDetection cell) {
+        if (!enabled) {
+            telemetry.addData("Camera reading", "camera off");
+        } else if (cell == null) {
+            telemetry.addData("Camera reading", "no up CELL in view");
+        } else {
+            telemetry.addData("Camera reading", "%s: range %.1f in, bearing %.1f°, yaw %.1f°, intake to stand ~%.0f in",
+                    cell.metadata.shortName, cell.ftcPose.range, cell.ftcPose.bearing, cell.ftcPose.yaw,
+                    intakeToStandInches(cell));
+        }
+    }
+
     // True when this CELL is the up one of its HIVE (see the comment at the top of this file).
     private boolean isUp(AprilTagClusterDetection cell, List<AprilTagClusterDetection> cells) {
         double height = cellHeightInches(cell);
@@ -427,6 +515,9 @@ public class AprilTagVision {
         }
         if (useLimelight) {
             return limelightCells();
+        }
+        if (plain) {
+            return cells;   // no AprilTag processor
         }
         // Every OpMode asks for CELLS every loop (also in init_loop), so this is where a camera
         // setting changed in FTC Dashboard, or still waiting for the camera to start, gets sent.
@@ -529,6 +620,21 @@ public class AprilTagVision {
         if (unchanged) {
             return;
         }
+        // GUARD: a webcam that refuses a setting must not stop the OpMode (and close the camera).
+        // The picture then keeps the camera's own exposure, and the Camera line says what happened.
+        try {
+            sendExposureAndGain();
+        } catch (RuntimeException e) {
+            cameraSettingsText = "camera REFUSED the exposure/gain settings (" + e.getMessage() + "): using its own";
+            sentManualExposure = MANUAL_EXPOSURE;   // don't try again every loop
+            sentExposureMs = EXPOSURE_MS;
+            sentGain = GAIN;
+            RobotLog.ww("AprilTagVision", "camera settings refused: %s", e);
+        }
+    }
+
+    // The exposure / gain part of applyCameraSettings(); it may throw if the webcam refuses a control.
+    private void sendExposureAndGain() {
         ExposureControl exposure = visionPortal.getCameraControl(ExposureControl.class);
         GainControl gain = visionPortal.getCameraControl(GainControl.class);
         if (exposure == null) {
@@ -597,6 +703,7 @@ public class AprilTagVision {
 
     // One line per HIVE CELL the camera sees: name, UP or down, height, how many of its tags, distance, angle.
     public void addTelemetry(Telemetry telemetry) {
+        telemetry.addData("Camera hardware", hardwareStatus);
         if (!enabled) {
             return;
         }
@@ -608,8 +715,13 @@ public class AprilTagVision {
         List<AprilTagClusterDetection> cells = visibleCells();   // also sends camera settings (webcam)
         if (!useLimelight) {
             // Check here that the settings arrived: fps drops if DECIMATION is too low for the hub.
-            telemetry.addData("Camera", "%dx%d, %.0f fps, decimation %d, %s", CAMERA_RESOLUTION.getWidth(),
-                    CAMERA_RESOLUTION.getHeight(), visionPortal.getFps(), sentDecimation, cameraSettingsText);
+            telemetry.addData("Camera", "%s, %dx%d, %.0f fps, decimation %d, %s", visionPortal.getCameraState(),
+                    CAMERA_RESOLUTION.getWidth(), CAMERA_RESOLUTION.getHeight(), visionPortal.getFps(),
+                    sentDecimation, cameraSettingsText);
+        }
+        if (plain) {
+            telemetry.addData("HIVE tags", "not looked for (PLAIN camera mode)");
+            return;
         }
         if (cells.isEmpty()) {
             telemetry.addData("HIVE tags", "none seen");
@@ -667,7 +779,7 @@ public class AprilTagVision {
             }
             return sb.length() == 0 ? "none" : sb.toString();
         }
-        List<AprilTagDetection> detections = aprilTag.getDetections();
+        List<AprilTagDetection> detections = plain ? null : aprilTag.getDetections();
         if (detections != null) {
             for (AprilTagDetection d : detections) {
                 if (d instanceof AprilTagSingleDetection) {

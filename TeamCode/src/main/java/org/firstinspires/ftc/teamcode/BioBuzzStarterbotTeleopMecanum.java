@@ -96,6 +96,10 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
     public static boolean TWO_DRIVERS = true;
     // How long the operator's gamepad rumbles when the launcher is ready, in milliseconds.
     public static int READY_RUMBLE_MS = 300;
+    // true: camera picture only (HDMI monitor and FTC Dashboard), no AprilTags and no exposure / gain
+    // settings, like Camera Test's PLAIN_CAMERA. Aim, distance speed and launch assist then see nothing.
+    // Set it in Dashboard BEFORE pressing INIT. Keep it false for matches.
+    public static boolean PLAIN_CAMERA = false;
 
     /*
      * The full telemetry only while the Dashboard is on (practice and tuning). The launch lines
@@ -140,7 +144,7 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
         // Feed in pulses (about 0.6 s per ball): the Octave launcher check only tested balls 0.42 s or
         // more apart; closer ones can knock each other out of the CELL.
         launcher.setPulseFeed(true);
-        vision = new AprilTagVision(hardwareMap);
+        vision = new AprilTagVision(hardwareMap, true, PLAIN_CAMERA);
         launchAssist = new LaunchAssist();   // loads the good launch poses saved in earlier runs
 
         if (SHOW_TELEMETRY) {
@@ -149,6 +153,10 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
                     RobotSwitches.USE_INTAKE, RobotSwitches.USE_LAUNCHER,
                     RobotSwitches.USE_CAMERA, RobotSwitches.USE_DASHBOARD, RobotSwitches.USE_LAUNCH_ASSIST);
             telemetry.addData("IMU", drive.hasImu() ? "found" : "missing: field-centric is off");
+        }
+        telemetry.addData("Camera hardware", vision.hardwareStatus());
+        if (PLAIN_CAMERA) {
+            telemetry.addData("Camera mode", "PLAIN (picture only, no AprilTags): set PLAIN_CAMERA = false for matches");
         }
         telemetry.addData("Saved launch poses", launchAssist.successCount());
     }
@@ -172,6 +180,10 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
             telemetry.addData("Alliance", "%s (driver B = RED, X = BLUE to change)", vision.getAlliance());
         }
         telemetry.addData("HIVE up", vision.upCellSummary());
+        vision.addReadingLine(telemetry, vision.aimedUpCell());   // range, bearing, yaw, intake to stand
+        if (!SHOW_TELEMETRY) {
+            telemetry.addData("Camera hardware", vision.hardwareStatus());
+        }
 
         // Lets the drive team check the camera before the match starts.
         if (SHOW_TELEMETRY) {
@@ -255,6 +267,7 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
         intake.runTeleop(operator.right_trigger - operator.left_trigger, launcher.isFeeding());
 
         // ---------------- 4. Telemetry ----------------
+        vision.addReadingLine(telemetry, cell);   // range, bearing, yaw, intake to stand
         showLaunchLines(aligning);           // always, also in competition
         if (SHOW_TELEMETRY) {
             showTelemetry(cell, driver);

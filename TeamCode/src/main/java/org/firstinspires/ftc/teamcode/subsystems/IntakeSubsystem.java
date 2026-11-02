@@ -112,6 +112,15 @@ public class IntakeSubsystem {
         run(0, 0);
     }
 
+    // The roller's real speed and the speed it was asked for, in ticks/s (+ = in; 0 when off).
+    public double getVelocity() {
+        return enabled ? intake.getVelocity() : 0;
+    }
+
+    public double getTargetVelocity() {
+        return targetVelocity;
+    }
+
     public void addTelemetry(Telemetry telemetry) {
         if (enabled) {
             telemetry.addData("intake velocity", intake.getVelocity());

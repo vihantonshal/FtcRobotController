@@ -25,7 +25,6 @@ package org.firstinspires.ftc.teamcode;
 
 import static com.qualcomm.robotcore.hardware.DcMotor.ZeroPowerBehavior.BRAKE;
 
-import com.qualcomm.robotcore.eventloop.opmode.Disabled;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.CRServo;
@@ -33,6 +32,11 @@ import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.PIDFCoefficients;
+import com.qualcomm.robotcore.util.Range;
+
+import org.firstinspires.ftc.robotcore.external.hardware.camera.WebcamName;
+import org.firstinspires.ftc.teamcode.subsystems.AprilTagVision;
+import org.firstinspires.ftc.teamcode.subsystems.RobotSwitches;
 
 
 /*
@@ -51,8 +55,8 @@ import com.qualcomm.robotcore.hardware.PIDFCoefficients;
  */
 
 @TeleOp(name = "BioBuzz StarterBot Teleop", group = "StarterBot")
-@Disabled
-public class BioBuzzStarterbotTeleop extends OpMode {
+//@Disabled
+public class BioBuzzStarterBotTeleop extends OpMode {
 
     // Declare OpMode members.
     private DcMotor leftDrive = null;
@@ -77,6 +81,17 @@ public class BioBuzzStarterbotTeleop extends OpMode {
     public final int LAUNCHER_MIN_VELOCITY = 1200;
 
     /*
+     * true when the launcher spins the right way but getVelocity() reads negative (the encoder counts
+     * backward). setDirection(REVERSE) can't fix that: it flips the power and the count together. The
+     * hub's velocity control would also run away to full power, so we flip the reading and set the
+     * power ourselves: power = KV * target + KP * (target - speed), never below 0.
+     * Set false on a robot whose launcher reads positive.
+     */
+    public static boolean LAUNCHER_ENCODER_REVERSED = true;
+    public static double LAUNCHER_KV = 1.0 / 2800;   // power per tick/s: full power at about 2800 ticks/s
+    public static double LAUNCHER_KP = 0.0005;       // extra power per tick/s below the target
+
+    /*
      * These two variables store the power we need to apply to the motors. In other cases, we may
      * choose to declare these variables inside the arcadeDrive() function, instead we declare them
      * here so that we can access them in our main loop for telemetry.
@@ -86,6 +101,9 @@ public class BioBuzzStarterbotTeleop extends OpMode {
 
     // Create a variable to set to the intake.
     double intakePower;
+
+    // Was the webcam found in the hardware configuration? Shown on the Driver Hub every loop.
+    String cameraStatus = "";
 
     /*
      * Code to run ONCE when the driver hits INIT
@@ -98,13 +116,42 @@ public class BioBuzzStarterbotTeleop extends OpMode {
          * to 'get' must correspond to the names assigned during the robot configuration
          * step.
          */
-        leftDrive = hardwareMap.get(DcMotor.class, "left_drive");
-        rightDrive = hardwareMap.get(DcMotor.class, "right_drive");
-        intake = hardwareMap.get(DcMotor.class, "intake");
-        launcher = hardwareMap.get(DcMotorEx.class, "launcher");
-        windmillServo = hardwareMap.get(CRServo.class, "windmill");
-        leftIntakeServo = hardwareMap.get(CRServo.class, "left_intake_servo");
-        rightIntakeServo = hardwareMap.get(CRServo.class, "right_intake_servo");
+        // RobotSwitches turns each part on or off; a part that is off is never looked up.
+        if (RobotSwitches.USE_DRIVE) {
+            leftDrive = hardwareMap.get(DcMotor.class, "left_drive");
+            rightDrive = hardwareMap.get(DcMotor.class, "right_drive");
+            setUpDrive();
+        }
+        if (RobotSwitches.USE_INTAKE) {
+            intake = hardwareMap.get(DcMotor.class, "intake");
+            leftIntakeServo = hardwareMap.get(CRServo.class, "left_intake_servo");
+            rightIntakeServo = hardwareMap.get(CRServo.class, "right_intake_servo");
+            setUpIntake();
+        }
+        if (RobotSwitches.USE_LAUNCHER) {
+            launcher = hardwareMap.get(DcMotorEx.class, "launcher");
+            windmillServo = hardwareMap.get(CRServo.class, "windmill");
+            setUpLauncher();
+        }
+
+        // Only checks that the webcam is there; this TeleOp does not use the camera.
+        WebcamName webcam = hardwareMap.tryGet(WebcamName.class, AprilTagVision.WEBCAM_NAME);
+        if (webcam == null) {
+            cameraStatus = "NOT FOUND: no \"" + AprilTagVision.WEBCAM_NAME + "\" in the configuration";
+        } else if (!webcam.isAttached()) {
+            cameraStatus = "\"" + AprilTagVision.WEBCAM_NAME + "\" configured but NOT PLUGGED IN";
+        } else {
+            cameraStatus = "found \"" + AprilTagVision.WEBCAM_NAME + "\", plugged in";
+        }
+
+        /*
+         * Tell the driver that initialization is complete.
+         */
+        telemetry.addData("Status", "Initialized");
+        telemetry.addData("Camera", cameraStatus);
+    }
+
+    void setUpDrive() {
 
         /*
          * To drive forward, most robots need the motor on one side to be reversed,
@@ -123,7 +170,21 @@ public class BioBuzzStarterbotTeleop extends OpMode {
          */
         leftDrive.setZeroPowerBehavior(BRAKE);
         rightDrive.setZeroPowerBehavior(BRAKE);
+    }
+
+    void setUpIntake() {
         intake.setZeroPowerBehavior(BRAKE);
+        leftIntakeServo.setPower(0);
+        rightIntakeServo.setPower(0);
+
+        /*
+         * Much like our drivetrain motors, we set the right intake servo to reverse so that both
+         * servos work to pull elements into the intake.
+         */
+        rightIntakeServo.setDirection(DcMotorSimple.Direction.REVERSE);
+    }
+
+    void setUpLauncher() {
 
         /*
          * Here we set our launcher to the RUN_USING_ENCODER runmode.
@@ -132,28 +193,21 @@ public class BioBuzzStarterbotTeleop extends OpMode {
          * into the port right beside the motor itself. And that the motors polarity is consistent
          * through any wiring.
          */
-        launcher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        if (LAUNCHER_ENCODER_REVERSED) {
+            // We set the power ourselves; the encoder still counts, so getVelocity() still works.
+            launcher.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+            launcher.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
+        } else {
+            launcher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
 
-        launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(40, 0, 0, 12.5));
+            launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(40, 0, 0, 12.5));
+        }
 
         /*
-         * set Feeders to an initial value to initialize the servo controller
+         * set the windmill to an initial value to initialize the servo controller
          */
-        leftIntakeServo.setPower(0);
-        rightIntakeServo.setPower(0);
         windmillServo.setPower(0);
-
-        /*
-         * Much like our drivetrain motors, we set the right intake servo to reverse so that both
-         * servos work to pull elements into the intake.
-         */
-        rightIntakeServo.setDirection(DcMotorSimple.Direction.REVERSE);
         windmillServo.setDirection(DcMotorSimple.Direction.REVERSE);
-
-        /*
-         * Tell the driver that initialization is complete.
-         */
-        telemetry.addData("Status", "Initialized");
     }
 
     /*
@@ -161,6 +215,7 @@ public class BioBuzzStarterbotTeleop extends OpMode {
      */
     @Override
     public void init_loop() {
+        telemetry.addData("Camera", cameraStatus);
     }
 
     /*
@@ -213,14 +268,21 @@ public class BioBuzzStarterbotTeleop extends OpMode {
          * change the intake power. So we need to give our launch function a chance to modify the
          * variable before we write it to our motor and servos.
          */
-        intake.setPower(intakePower);
-        leftIntakeServo.setPower(intakePower);
-        rightIntakeServo.setPower(intakePower);
+        if (intake != null) {
+            intake.setPower(intakePower);
+            leftIntakeServo.setPower(intakePower);
+            rightIntakeServo.setPower(intakePower);
+        }
 
         /*
          * Show motor powers on the Driver Station via telemetry.
          */
+        telemetry.addData("Camera", cameraStatus);
         telemetry.addData("Motors", "left (%.2f), right (%.2f)", leftPower, rightPower);
+        if (launcher != null) {
+            telemetry.addData("Launcher", "velocity %.0f (min %d), power %.2f",
+                    launcherVelocity(), LAUNCHER_MIN_VELOCITY, launcher.getPower());
+        }
         telemetry.addLine();
 
     }
@@ -239,11 +301,16 @@ public class BioBuzzStarterbotTeleop extends OpMode {
         /*
          * Send calculated power to motors
          */
-        leftDrive.setPower(leftPower);
-        rightDrive.setPower(rightPower);
+        if (leftDrive != null) {
+            leftDrive.setPower(leftPower);
+            rightDrive.setPower(rightPower);
+        }
     }
 
     void launch() {
+        if (launcher == null) {
+            return;
+        }
         /*
          * Calling gamepad1.right_bumper returns a boolean which will be true if the bumper is
          * held down, and false if it is not. Notably, this will continue to be true for every
@@ -252,10 +319,14 @@ public class BioBuzzStarterbotTeleop extends OpMode {
          * holding down the right gamepad. If they are, then we want to start spinning up the launcher.
          * Otherwise, we start spinning the launcher down.
          */
-        if (gamepad1.right_bumper) {
-            launcher.setVelocity(LAUNCHER_TARGET_VELOCITY);
+        double target = gamepad1.right_bumper ? LAUNCHER_TARGET_VELOCITY : 0;
+        if (!LAUNCHER_ENCODER_REVERSED) {
+            launcher.setVelocity(target);
+        } else if (target <= 0) {
+            launcher.setPower(0);
         } else {
-            launcher.setVelocity(0);
+            double power = LAUNCHER_KV * target + LAUNCHER_KP * (target - launcherVelocity());
+            launcher.setPower(Range.clip(power, 0, 1));
         }
 
         /*
@@ -265,12 +336,18 @@ public class BioBuzzStarterbotTeleop extends OpMode {
          * add some power to the intake power. This can sometimes help dislodge stuck elements from
          * inside the hopper.
          */
-        if (gamepad1.right_bumper && launcher.getVelocity() > LAUNCHER_MIN_VELOCITY) {
+        if (gamepad1.right_bumper && launcherVelocity() > LAUNCHER_MIN_VELOCITY) {
             windmillServo.setPower(1);
             intakePower += 0.5;
         } else {
             windmillServo.setPower(0);
         }
+    }
+
+    // Launcher speed in ticks/s, positive when spinning the launch way (flipped if the encoder counts backward).
+    double launcherVelocity() {
+        double v = launcher.getVelocity();
+        return LAUNCHER_ENCODER_REVERSED ? -v : v;
     }
 
 

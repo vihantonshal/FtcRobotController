@@ -381,6 +381,11 @@ public class BioBuzzStarterBotAuto extends OpMode
         vision.addTelemetry(telemetry);
         launcher.addTelemetry(telemetry);
         drive.addPositionTelemetry(telemetry);
+        // The wheel and intake velocity/target lines, for the FTC Dashboard graphs (as in the TeleOp).
+        if (RobotSwitches.USE_DASHBOARD) {
+            drive.addTelemetry(telemetry);
+            intake.addTelemetry(telemetry);
+        }
         telemetry.update();
     }
 

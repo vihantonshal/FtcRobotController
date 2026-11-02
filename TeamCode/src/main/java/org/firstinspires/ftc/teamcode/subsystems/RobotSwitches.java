@@ -6,6 +6,8 @@ package org.firstinspires.ftc.teamcode.subsystems;
  * nothing, so the robot still drives while the build team has that part off the robot.
  * The TeleOp, the Auto and BioBuzzMotorMaxSpeed all read these, so they always agree.
  *
+ *  USE_DRIVE     the four mecanum drive motors                (MecanumDriveSubsystem)
+ *                false = the robot never moves (for testing only the camera / AprilTags)
  *  USE_INTAKE    intake motor + left/right intake servos        (IntakeSubsystem)
  *  USE_LAUNCHER  launcher motor + windmill servo                (LauncherSubsystem)
  *  USE_CAMERA    a camera and AprilTag aiming                   (AprilTagVision)
@@ -20,6 +22,7 @@ package org.firstinspires.ftc.teamcode.subsystems;
  *                (needs the "imu"), and FIELD_CENTRIC_AT_START picks the mode at INIT.
  */
 public final class RobotSwitches {
+    public static final boolean USE_DRIVE = true;
     public static final boolean USE_INTAKE = true;
     public static final boolean USE_LAUNCHER = true;
     public static final boolean USE_CAMERA = true;
