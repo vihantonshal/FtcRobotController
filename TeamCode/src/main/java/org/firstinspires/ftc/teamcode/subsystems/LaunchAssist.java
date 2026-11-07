@@ -38,6 +38,8 @@ import java.util.Locale;
  * many trips the robot made. With no up CELL in view, or none saved for the CELL in view, there is
  * no target: the LED stays blue and the align button does nothing, so the driver turns toward the
  * HIVE until the camera sees it.
+ * AUTO LAUNCH (AUTO_LAUNCH below): while the driver holds the align button, autoLaunch() also spins
+ * the flywheel up, and once the pose is OK it feeds until the button is released.
  * The log also keeps the odometry pose (x, y, heading from INIT) for looking at later; check()
  * does not use it, because it depends on where TeleOp started and drifts with every trip.
  *
@@ -67,6 +69,8 @@ public class LaunchAssist {
     public static double ALIGN_MAX_POWER = 0.4;
     // In tag mode, a yaw error is fixed by strafing. If the robot strafes the wrong way, set -1.
     public static double YAW_STRAFE_SIGN = 1;
+    // true: the align button also launches once the pose is OK. false: it only drives to the pose.
+    public static boolean AUTO_LAUNCH = true;
 
     public static final String LOG_PATH = "BioBuzz/launch_log.csv";
     // The built-in poses inside the app (TeamCode/src/main/resources), see the top of this file.
@@ -142,6 +146,9 @@ public class LaunchAssist {
     private Status status = new Status();
     private int ledState = -1;
     private boolean alignWasOk = false;
+    private boolean autoHeld = false;         // the auto-launch button is being held
+    private boolean launcherWasOn = false;    // the launcher's state before the hold, put back on release
+    private boolean autoFiring = false;       // the pose was OK during this hold: keep feeding until release
     private String message = null;
     private final ElapsedTime messageTimer = new ElapsedTime();
 
@@ -244,6 +251,29 @@ public class LaunchAssist {
         }
     }
 
+    /*
+     * AUTO LAUNCH, once per loop after update(): held = the driver holds the align button. The flywheel
+     * spins up during the hold. The first time the pose is OK it logs one launch, and from then on it
+     * returns true (feed) until the button is released, so a small bump from a shot doesn't stop the feed.
+     * On release the launcher goes back to how the operator left it.
+     */
+    public boolean autoLaunch(boolean held, LauncherSubsystem launcher) {
+        boolean active = held && AUTO_LAUNCH && enabled;
+        if (active && !autoHeld) {
+            launcherWasOn = launcher.isOn();
+            launcher.setOn(true);
+        } else if (!active && autoHeld) {
+            launcher.setOn(launcherWasOn);
+            autoFiring = false;
+        }
+        autoHeld = active;
+        if (active && !autoFiring && status.ok) {
+            autoFiring = true;
+            recordLaunch();
+        }
+        return autoFiring;
+    }
+
     // While auto-aligning: rumble the driver's gamepad once when the robot gets there ("you're there").
     public void rumbleWhenAligned(Gamepad driver, boolean aligning) {
         boolean there = aligning && status.ok;
@@ -255,7 +285,7 @@ public class LaunchAssist {
 
     // The launch-assist lines the drive team always sees.
     public void addDriverLines(Telemetry telemetry, boolean aligning) {
-        telemetry.addData("Launch pose", (aligning ? "ALIGNING: " : "") + status.text);
+        telemetry.addData("Launch pose", (autoFiring ? "LAUNCHING: " : aligning ? "ALIGNING: " : "") + status.text);
         telemetry.addData("Saved launch poses", "%d, %d built-in (operator B saves the last launch)",
                 successCount(), defaultCount);
         if (message != null && messageTimer.seconds() < 2) {
@@ -281,7 +311,7 @@ public class LaunchAssist {
                 launcher.getVelocity(), launcher.getRpm(), launcher.getDirection());
     }
 
-    // Call once per launch (the operator's A press): one LAUNCH line in the log.
+    // Call once per launch (the driver's A press): one LAUNCH line in the log.
     public void recordLaunch(Snapshot s) {
         if (!enabled) {
             return;

@@ -15,7 +15,7 @@ import org.firstinspires.ftc.teamcode.subsystems.LauncherSubsystem;
  *
  * Gamepad 1:
  *   right bumper      launcher on / off
- *   A (hold)          feed (the windmill waits until the flywheel is at speed, then feeds in pulses)
+ *   A (hold)          feed (the roller motor "roller" waits until the flywheel is at speed, then feeds in pulses)
  *   D-pad right/left  trim the speed + / - TRIM_STEP
  *   B                 clear the measurements
  *
@@ -62,6 +62,8 @@ public class BioBuzzLauncherTest extends OpMode {
         telemetry = new MultipleTelemetry(telemetry, FtcDashboard.getInstance().getTelemetry());
         launcher = new LauncherSubsystem(hardwareMap);
         telemetry.addData("Launcher", launcher.isEnabled() ? "on" : "OFF: set RobotSwitches.USE_LAUNCHER = true");
+        telemetry.addData("Feeder", launcher.getFeederText());
+        telemetry.addData("Roller", launcher.getRollerText());
         telemetry.addLine("Right bumper = on/off, hold A = feed. Tune in FTC Dashboard: LauncherSubsystem.");
     }
 
@@ -101,7 +103,9 @@ public class BioBuzzLauncherTest extends OpMode {
                         ? String.format("distance %.0f in", TEST_RANGE_IN)
                         : String.format("TARGET_VELOCITY %.0f x SPEED_SCALE %.2f", LauncherSubsystem.TARGET_VELOCITY, LauncherSubsystem.SPEED_SCALE),
                 launcher.getTrim());
-        telemetry.addData("Spin-up", Double.isNaN(spinUpSeconds) ? "-" : String.format("%.2f s", spinUpSeconds));
+        telemetry.addData("Feeder", launcher.getFeederText());
+        telemetry.addData("Roller", launcher.getRollerText());
+        telemetry.addData("Spin-up",Double.isNaN(spinUpSeconds) ? "-" : String.format("%.2f s", spinUpSeconds));
         telemetry.addData("Overshoot", "%+.0f ticks/s over the target", overshoot);
         telemetry.addData("Dip while feeding", Double.isNaN(dipLowest) ? "-" : String.format("lowest %.0f (%.0f below)", dipLowest, target - dipLowest));
         telemetry.addData("Recovery", Double.isNaN(recoverySeconds) ? "-" : String.format("%.2f s back to speed", recoverySeconds));

@@ -28,6 +28,7 @@ import static com.qualcomm.robotcore.hardware.DcMotor.ZeroPowerBehavior.BRAKE;
 import com.acmerobotics.dashboard.FtcDashboard;
 import com.acmerobotics.dashboard.config.Config;
 import com.acmerobotics.dashboard.telemetry.MultipleTelemetry;
+import com.qualcomm.robotcore.eventloop.opmode.Disabled;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.CRServo;
@@ -76,7 +77,7 @@ import org.firstinspires.ftc.vision.apriltag.AprilTagClusterDetection;
 
 @Config
 @TeleOp(name = "BioBuzz StarterBot Teleop + Vision", group = "StarterBot")
-//@Disabled
+@Disabled
 public class BioBuzzStarterbotTeleopBase extends OpMode {
 
     /*
@@ -165,8 +166,8 @@ public class BioBuzzStarterbotTeleopBase extends OpMode {
         launcher = new LauncherSubsystem(hardwareMap, true);
         // This robot's windmill turns the other way from the mecanum robot's (REVERSE there).
         launcher.setWindmillDirection(DcMotorSimple.Direction.FORWARD);
-        // Hold the right bumper to keep launching: the windmill feeds, pauses for the flywheel to recover, feeds again.
-        launcher.setPulseFeed(true);
+        // Hold the right bumper to launch: once at speed, the roller and windmill run without a pause until it is released.
+        launcher.setContinuousFeed(true);
         vision = new AprilTagVision(hardwareMap, USE_CAMERA);
         launchAssist = new LaunchAssist(LaunchAssist.TANK_DEFAULTS_RESOURCE, LaunchAssist.TANK_LOG_PATH);
 

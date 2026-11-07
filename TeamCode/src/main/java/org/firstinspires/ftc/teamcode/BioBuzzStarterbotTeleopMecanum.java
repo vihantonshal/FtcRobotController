@@ -61,17 +61,19 @@ import org.firstinspires.ftc.vision.apriltag.AprilTagClusterDetection;
  *            is tilted up ("HIVE up"). Not picked: the target is the up CELL the robot points at.
  *  DRIVER    left stick: drive and strafe         right stick X: turn
  *            left bumper (hold): turn toward the up CELL opening (AprilTag cluster)
- *            right bumper (hold): drive to the nearest saved good launch pose
- *                                 (D-pad up instead when TWO_DRIVERS is false)
+ *            right bumper (hold): AUTO LAUNCH: spin up, drive to the nearest saved good launch pose
+ *                                 for the up CELL, then launch until released. Needs that CELL in
+ *                                 view. (D-pad up instead when TWO_DRIVERS is false; LaunchAssist.
+ *                                 AUTO_LAUNCH = false makes it drive only.)
  *            Driving is robot-centric: stick up = the way the robot's front faces.
+ *            A (hold): feed balls; once the launcher is at speed the roller runs without stopping
+ *                      until A is released
  *            X: slow mode on/off (for lining up)
  *            Y: field-centric on/off, ONLY when RobotSwitches.USE_FIELD_CENTRIC is true (it is
  *               false now, so Y does nothing)
  *            back/share: field-centric only, reset "forward" to the way the robot faces now
  *  OPERATOR  right trigger: intake in             left trigger: intake out
  *            right bumper: launcher on/off (it keeps spinning; the gamepad rumbles when ready)
- *            A (hold): feed balls; the windmill only feeds once the launcher is at speed, in
- *                      pulses so the flywheel recovers between balls
  *            D-pad right/left: launcher a bit faster/slower (practice trim; the speed also follows
  *                              the distance to the up CELL, see LauncherSubsystem)
  *            B: the last launch scored, save its pose as a good launch pose
@@ -141,9 +143,10 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
         drive = new MecanumDriveSubsystem(hardwareMap);
         intake = new IntakeSubsystem(hardwareMap);
         launcher = new LauncherSubsystem(hardwareMap);
-        // Feed in pulses (about 0.6 s per ball): the Octave launcher check only tested balls 0.42 s or
-        // more apart; closer ones can knock each other out of the CELL.
-        launcher.setPulseFeed(true);
+        // The roller runs without pausing while the driver holds A, once the launcher has reached speed. The Octave
+        // launcher check only tested balls 0.42 s or more apart; closer ones can knock each other out of
+        // the CELL. If that happens, go back to launcher.setPulseFeed(true) (about 0.6 s per ball).
+        launcher.setContinuousFeed(true);
         vision = new AprilTagVision(hardwareMap, true, PLAIN_CAMERA);
         launchAssist = new LaunchAssist();   // loads the good launch poses saved in earlier runs
 
@@ -254,11 +257,12 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
         if (operator.dpadLeftWasPressed()) {
             launcher.adjustTrim(-1);         // a bit slower
         }
-        launcher.run(operator.a);            // off, spinning, or feeding while A is held
+        boolean autoFeed = launchAssist.autoLaunch(alignHeld, launcher);   // flywheel on, feed once the pose is OK
+        launcher.run(driver.a || autoFeed);  // off, spinning, or feeding
         if (launcher.justBecameReady()) {
             operator.rumble(READY_RUMBLE_MS);
         }
-        if (operator.aWasPressed() && launcher.isOn()) {
+        if (driver.aWasPressed() && launcher.isOn()) {
             launchAssist.recordLaunch();     // each A press is one launch in the log
         }
         if (operator.bWasPressed()) {
@@ -289,6 +293,7 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
         }
         launchAssist.addDriverLines(telemetry, aligning);
         launcher.addDriverLines(telemetry);
+        telemetry.addData("Roller", launcher.getRollerText());
     }
 
     /*

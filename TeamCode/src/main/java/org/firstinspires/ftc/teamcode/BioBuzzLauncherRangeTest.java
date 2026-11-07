@@ -23,6 +23,10 @@ import java.util.Locale;
 import java.util.Map;
 
 /*
+1. Get the file onto your computer
+adb connect 192.168.43.1:5555
+adb pull /sdcard/FIRST/BioBuzz/launcher_range_test.csv
+
  * LAUNCHER RANGE TEST: try every combination of distance (from the camera) and flywheel speed,
  * and write every shot, HIT or MISS, to /sdcard/FIRST/BioBuzz/launcher_range_test.csv.
  * Its own file: test shots never become TeleOp launch poses (launch_log.csv is not touched).
@@ -37,15 +41,17 @@ import java.util.Map;
  *   right bumper                 launcher on / off
  *   D-pad right / left           speed + / - SPEED_STEP ticks/s
  *   D-pad up / down              speed + / - 4 x SPEED_STEP
- *   A (tap)                      launch ONE ball: one feed pulse, once the flywheel is at speed
+ *   A (hold)                     feed: once the flywheel is at speed the roller runs without a
+ *                                pause until A is released (same as the TeleOp)
  *   Y                            the last shot scored: HIT
  *   B                            the last shot missed: MISS
- *   A shot not marked before the next one is written as UNMARKED.
+ *   One hold of A is one shot in the log, however many balls it launched. A shot not marked before
+ *   the next one is written as UNMARKED. For one ball per row, load one ball or release A quickly.
  *
  * HOW TO TEST
  *   1. Move the robot until "Camera" shows the distance you want (e.g. 51, 55, 59, 63, 67 in) and
  *      aim it so "launcher" reads near 0°.
- *   2. Set a speed with the D-pad, wait for "READY", tap A, then Y or B.  3-5 balls per combination.
+ *   2. Set a speed with the D-pad, wait for "READY", hold A, then Y or B.  3-5 balls per combination.
  *   3. Change the speed, repeat; then the next distance. "Results" shows hits/shots per combination.
  *   4. adb pull /sdcard/FIRST/BioBuzz/launcher_range_test.csv  and open it in a spreadsheet.
  *      Delete the file on the hub to start a fresh test.
@@ -75,7 +81,7 @@ public class BioBuzzLauncherRangeTest extends OpMode {
     public static double RANGE_BIN_IN = 2;
     // A CELL seen this recently still counts when the ball is fed (the camera can lose it for a frame).
     public static double CELL_HOLD_SECONDS = 0.5;
-    // How long after the feed pulse the dip is still measured.
+    // How long after feeding stops the dip is still measured.
     public static double DIP_WINDOW_SECONDS = 0.6;
     // Only the camera and the launcher run in this test. Turn these on in FTC Dashboard BEFORE INIT
     // to drive (and aim with the left bumper) or run the intake; off = place the robot by hand.
@@ -94,9 +100,9 @@ public class BioBuzzLauncherRangeTest extends OpMode {
     private AprilTagClusterDetection lastCell = null;
     private long lastCellMs = 0;
 
-    // One shot: requested with A, captured when the feed starts, written when marked.
-    private boolean shotRequested = false;
+    // One shot = one hold of A: captured when the feed starts, written when marked.
     private boolean wasFeeding = false;
+    private long lastFeedMs = 0;
     private Shot pending = null;
     private int shotCount = 0;
     // hits and shots per "range @ speed" combination, in the order they were tried.
@@ -124,14 +130,14 @@ public class BioBuzzLauncherRangeTest extends OpMode {
         intake = USE_INTAKE ? new IntakeSubsystem(hardwareMap) : null;
         launcher = new LauncherSubsystem(hardwareMap);
         vision = new AprilTagVision(hardwareMap);
-        launcher.setPulseFeed(true);
+        launcher.setContinuousFeed(true);
         // One fixed speed per combination: the distance speed would change it as the robot moves.
         savedDistanceSpeed = LauncherSubsystem.USE_DISTANCE_SPEED;
         LauncherSubsystem.USE_DISTANCE_SPEED = false;
         telemetry.addData("Launcher", launcher.isEnabled() ? "on" : "OFF: set RobotSwitches.USE_LAUNCHER = true");
         telemetry.addData("Camera hardware", vision.hardwareStatus());
         telemetry.addData("Log", file.getPath());
-        telemetry.addLine("Right bumper = launcher, tap A = one ball, Y = hit, B = miss.");
+        telemetry.addLine("Right bumper = launcher, hold A = feed nonstop, Y = hit, B = miss.");
     }
 
     @Override
@@ -176,8 +182,6 @@ public class BioBuzzLauncherRangeTest extends OpMode {
         // ---------------- Speed ----------------
         if (gamepad1.rightBumperWasPressed()) {
             launcher.toggleOn();
-            shotRequested = false;
-
         }
         if (gamepad1.dpadRightWasPressed()) {
             changeSpeed(1);
@@ -192,20 +196,17 @@ public class BioBuzzLauncherRangeTest extends OpMode {
             changeSpeed(-4);
         }
 
-        // ---------------- One shot per A tap ----------------
-        if (gamepad1.aWasPressed() && launcher.isOn() && !shotRequested) {
-            shotRequested = true;
-        }
-        launcher.run(shotRequested);
+        // ---------------- One shot per hold of A ----------------
+        launcher.run(gamepad1.a);            // once at speed, the roller runs until A is released
         boolean feeding = launcher.isFeeding();
         if (feeding && !wasFeeding) {
-            startShot(cell);                 // the ball goes now: this is the shot's speed and distance
-        }
-        if (!feeding && wasFeeding) {
-            shotRequested = false;           // one pulse = one ball
+            startShot(cell);                 // the feed starts now: this is the shot's speed and distance
         }
         wasFeeding = feeding;
-        if (pending != null && nowMs - pending.timeMs <= (LauncherSubsystem.FEED_ON_SECONDS + DIP_WINDOW_SECONDS) * 1000) {
+        if (feeding) {
+            lastFeedMs = nowMs;
+        }
+        if (pending != null && nowMs - lastFeedMs <= DIP_WINDOW_SECONDS * 1000) {
             pending.lowest = Math.min(pending.lowest, launcher.getVelocity());
         }
 
@@ -254,7 +255,7 @@ public class BioBuzzLauncherRangeTest extends OpMode {
 
     private void mark(String result) {
         if (pending == null) {
-            message = "No shot to mark: tap A first";
+            message = "No shot to mark: hold A first";
             return;
         }
         Shot s = pending;
@@ -309,9 +310,11 @@ public class BioBuzzLauncherRangeTest extends OpMode {
         telemetry.addData("Speed", "%.0f of %.0f ticks/s (base %.0f %+.0f), %s",
                 launcher.getVelocity(), target, LauncherSubsystem.TARGET_VELOCITY * LauncherSubsystem.SPEED_SCALE,
                 launcher.getTrim(), !launcher.isOn() ? "OFF (right bumper)"
-                        : shotRequested ? "FIRING..." : launcher.isAtSpeed() ? "READY: tap A" : "spinning up");
+                        : launcher.isFeeding() ? "FEEDING..." : launcher.isAtSpeed() ? "READY: hold A" : "spinning up");
+        telemetry.addData("Roller", launcher.getRollerText());
         telemetry.addData("Drive", drive != null ? drive.getModeText() : "off: place the robot by hand (USE_DRIVE)");
         telemetry.addData("Shot", message.isEmpty() ? "-" : message);
+
         telemetry.addData("Shots logged", "%d (%s)", shotCount, fileProblem != null ? fileProblem : LOG_PATH);
         telemetry.addLine("Results (hits / shots):");
         List<String> keys = new ArrayList<>(results.keySet());

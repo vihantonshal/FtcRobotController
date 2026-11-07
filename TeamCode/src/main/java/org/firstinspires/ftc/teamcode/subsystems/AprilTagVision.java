@@ -112,16 +112,15 @@ public class AprilTagVision {
      * camera looks up). Same numbers as BioBuzzAutoAprilTag.
      */
     // Planned Logitech C270 mount (Camera Mount C270 Clip Front - Launcher Channel, beside the +X launcher
-    // channel, looking FORWARD like the v6 shot). Lens 12.6 in above the TILES. Re-measure on the built robot.
-    // 38 degrees up (was 45): the CELL's tag row is about 49.7 in above the TILES, 37.1 in above the lens.
-    // From the closest launch spot (NEAR_RANGE_IN, tags ~30 in away along the floor) the camera looks up
-    // atan(37.1 / 30) = 51 degrees, from the farthest (FAR_RANGE_IN, ~79 in) atan(37.1 / 79) = 25 degrees.
-    // Halfway, (51 + 25) / 2 = 38, keeps both inside the C270's 32.5 degree tall picture with ~3 degrees to
-    // spare at each edge; at 45 the picture's bottom edge is 29 degrees, so the far spot was out of view.
-    // Any tilt from about 36 to 40 works (docs/vision-deck, slide 9). The mount must really be tilted 38:
-    // measure it, and re-save the launch poses after re-tilting.
-    public static double CAMERA_HEIGHT_IN = 12.6;
-    public static double CAMERA_PITCH_DEG = 38.0;
+    // channel, looking FORWARD like the v6 shot). Lens 11.25 in above the TILES.
+    // FIXED at 50 degrees up for now: the most this mount can tilt. The CELL's tag row is about 49.7 in above
+    // the TILES, 38.45 in above the lens. The C270's picture is 32.5 degrees tall, so at 50 it covers 33.75 to
+    // 66.25 degrees up: the tags stay in view from about 17 to 57 in along the floor. That covers the
+    // shooting zone (about 28-48 in) but not the FAR_RANGE_IN spot (about 79 in).
+    // Range depends on this tilt: re-save the launch poses and re-check ZONE_MIN/MAX_RANGE_IN and
+    // STAND_OFFSET_IN if it changes. Camera Test's tilt finder checks the mount really is at 50.
+    public static double CAMERA_HEIGHT_IN = 11.25;
+    public static double CAMERA_PITCH_DEG = 50;
 
     /*
      * Where the launcher's line of fire is, seen from the camera lens, so aiming points the LAUNCHER
@@ -156,7 +155,7 @@ public class AprilTagVision {
      *
      * DECIMATION: the tag finder first looks for squares in a smaller copy of the picture, DECIMATION
      * times smaller each way. Bigger = faster but sees less far. The SDK default is 3, which finds our
-     * 3.25 in tags to only about 6.5 ft, right at the far edge of what our 45-degree camera can see.
+     * 3.25 in tags to only about 6.5 ft.
      * 2 reaches about 9.75 ft at about 22 pictures a second (SDK sample ConceptAprilTag, 2 in tag
      * distances scaled by 3.25 / 2). Check "Camera ... fps" on the Driver Hub after changing it.
      *
@@ -469,10 +468,11 @@ public class AprilTagVision {
     /*
      * Intake (the robot's front) to the HIVE stand, from the camera: range minus STAND_OFFSET_IN. The
      * offset is the lens behind the intake plus the CELL opening set back inside the HIVE (CAD and
-     * simulation: range 54.2 in with the front 15 in from the stand). Only right when the robot faces
-     * the CELL square. Check once: tape-measure intake to stand, then STAND_OFFSET_IN = range - tape.
+     * simulation: range 56.8 in at 50 degrees tilt with the front 15 in from the stand). Only right when
+     * the robot faces the CELL square. Check once: tape-measure intake to stand, then
+     * STAND_OFFSET_IN = range - tape.
      */
-    public static double STAND_OFFSET_IN = 39.2;
+    public static double STAND_OFFSET_IN = 41.8;
 
     public double intakeToStandInches(AprilTagDetection cell) {
         return cell.ftcPose.range - STAND_OFFSET_IN;

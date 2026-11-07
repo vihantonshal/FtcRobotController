@@ -2,6 +2,7 @@ package org.firstinspires.ftc.teamcode;
 
 import com.acmerobotics.dashboard.FtcDashboard;
 import com.acmerobotics.dashboard.telemetry.MultipleTelemetry;
+import com.qualcomm.robotcore.eventloop.opmode.Disabled;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.DcMotor;
@@ -32,6 +33,7 @@ import java.util.List;
  * Use a well-charged battery, because a tired battery gives a lower top speed.
  */
 @TeleOp(name = "BioBuzz Motor Max Speed", group = "StarterBot")
+@Disabled
 public class BioBuzzMotorMaxSpeed extends OpMode {
 
     // Names from the Driver Hub configuration, the same ones the StarterBot programs use.

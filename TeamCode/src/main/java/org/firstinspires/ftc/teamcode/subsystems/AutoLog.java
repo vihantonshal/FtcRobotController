@@ -54,6 +54,7 @@ public class AutoLog {
     private String cameraSees = "";         // the Driver Hub's "Camera sees" line
     private String launchSpot = null;       // the Driver Hub's "Launched" line
 
+    // vision may be null, for an Auto without a camera (BioBuzzStarterBotAutoNoCamera).
     public AutoLog(MecanumDriveSubsystem drive, AprilTagVision vision, LauncherSubsystem launcher) {
         this.drive = drive;
         this.vision = vision;
@@ -81,8 +82,9 @@ public class AutoLog {
      */
     public void step(String from, String to, String reason) {
         double t = clock.seconds();
-        AprilTagClusterDetection cell = vision.closestTag();
-        String upCell = !vision.isEnabled() ? "camera off" : cell == null ? "none" : cell.metadata.shortName;
+        AprilTagClusterDetection cell = vision != null ? vision.closestTag() : null;
+        String upCell = vision == null ? "no camera" : !vision.isEnabled() ? "camera off"
+                : cell == null ? "none" : cell.metadata.shortName;
         steps.add(String.format(Locale.US, "%5.1f s  %s -> %s: %s", t, from, to, reason));
         String row = String.format(Locale.US, "%s,%.2f,%s,%s,%s,%.1f,%.1f,%.1f,%s,%.0f",
                 runId, t, from, to, reason, drive.getPoseX(), drive.getPoseY(), drive.getPoseHeadingDeg(),
@@ -95,6 +97,10 @@ public class AutoLog {
      * while it stays the same, so the file shows when the camera saw the HIVE's tags and when it saw nothing.
      */
     public void tags(String state) {
+        if (vision == null) {   // an Auto without a camera: no tag log
+            cameraSees = "no camera";
+            return;
+        }
         String key = vision.seenSummary(false);
         cameraSees = vision.seenSummary(true);
         if (key.equals(lastSeenKey) && tagLogTimer.seconds() < 1) {
@@ -113,9 +119,11 @@ public class AutoLog {
      * Example: "RED SCORING (far CELL), turned 15° left, at (0.3, -0.1) in".
      */
     public void launchSpot(double startHeadingDeg) {
-        AprilTagClusterDetection cell = vision.closestTag();
+        AprilTagClusterDetection cell = vision != null ? vision.closestTag() : null;
         String target;
-        if (!vision.isEnabled()) {
+        if (vision == null) {
+            target = "no camera (fixed launch spot)";
+        } else if (!vision.isEnabled()) {
             target = "camera off";
         } else if (cell == null) {
             target = "no up CELL found";

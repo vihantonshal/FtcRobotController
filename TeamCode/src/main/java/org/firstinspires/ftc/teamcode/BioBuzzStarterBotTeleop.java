@@ -25,6 +25,7 @@ package org.firstinspires.ftc.teamcode;
 
 import static com.qualcomm.robotcore.hardware.DcMotor.ZeroPowerBehavior.BRAKE;
 
+import com.qualcomm.robotcore.eventloop.opmode.Disabled;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.CRServo;
@@ -55,7 +56,7 @@ import org.firstinspires.ftc.teamcode.subsystems.RobotSwitches;
  */
 
 @TeleOp(name = "BioBuzz StarterBot Teleop", group = "StarterBot")
-//@Disabled
+@Disabled
 public class BioBuzzStarterBotTeleop extends OpMode {
 
     // Declare OpMode members.
