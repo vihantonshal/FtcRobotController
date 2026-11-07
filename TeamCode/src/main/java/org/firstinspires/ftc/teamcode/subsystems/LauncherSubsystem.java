@@ -16,6 +16,10 @@ import org.firstinspires.ftc.vision.apriltag.AprilTagClusterDetection;
 import java.util.Locale;
 
 /*
+1. Get the file onto your computer
+adb connect 192.168.43.1:5555
+adb pull /sdcard/FIRST/BioBuzz/launcher_range_test.csv
+
  * The launcher (5203-2402-0019 converted to 1:1, about 6000 RPM, 96 mm wheel) and the windmill
  * servo that feeds balls into it. Switched on and off with RobotSwitches.USE_LAUNCHER; when it is
  * off, nothing here looks for hardware and every method does nothing.
@@ -41,7 +45,7 @@ import java.util.Locale;
  * from 19.2 cm above the TILES, the CELL mouth's real lips, built on volley_sim.py,
  * launcher wheel + goBILDA 3628 flywheel, each ball's own speed drop included, aiming at the center of the
  * up CELL opening, 151 cm), not yet measured on the field: StarterBot_Change_Guide.md, "Distance-based flywheel speed". Shots are most
- * reliable from about 52-67 in of range (0.6-1.25 m along the floor): the up CELL's opening faces the robot
+ * reliable from about 55-68 in of range at 50 degrees camera tilt (0.6-1.25 m along the floor): the up CELL's opening faces the robot
  * tipped 30 degrees up, so closer shots still rise too steeply to go in; 54.4 in (0.75 m) is the best entry
  * angle. The operator's trim (D-pad left/right
  * in the TeleOp) adds to the speed while practicing, to find what scores at each distance. Tune PIDF in FTC Dashboard under "LauncherSubsystem" while the launcher spins: a changed
@@ -63,14 +67,19 @@ public class LauncherSubsystem {
     // The feed wheel (CR servo "feedWheel" beside the Runway lead-in) runs whenever the windmill does.
     // Seen from above it must turn clockwise so it pushes the ball toward the launcher: -1.0 if it turns the wrong way.
     public static double FEED_WHEEL_POWER = 1.0;
+    // The feed ROLLER: a DC motor that replaces the windmill servo, named "roller" in the configuration
+    // (a motor named "windmill" or "windmillServo" works too). It feeds exactly when the windmill would:
+    // only while feeding and the flywheel is at speed. Power -1..1; if it pushes the POLLEN away from the
+    // launcher, set ROLLER_POWER negative (in FTC Dashboard to try it, then here).
+    public static double ROLLER_POWER = 1.0;
     // Distance-based speed (see the top of this file). Ranges in inches, speeds in ticks/s.
     // OFF for Runway v10: at 70 degrees the right speed hardly changes with distance. NEAR/FAR are the
     // Runway v6 (77 degree) line: set true again only with a 77 degree runway on the robot.
-    public static boolean USE_DISTANCE_SPEED = false;
+    public static boolean USE_DISTANCE_SPEED = true;
     public static double NEAR_RANGE_IN = 54.4;     // about 0.75 m along the floor (see the top of this file)
     public static double NEAR_VELOCITY = 1381;     // starting point from the simulation (v6 front launch), not measured yet
     public static double FAR_RANGE_IN = 89.9;      // about 2 m along the floor
-    public static double FAR_VELOCITY = 1994;      // starting point from the simulation (v6 front launch), not measured yet
+    public static double FAR_VELOCITY = 1594;      // starting point from the simulation (v6 front launch), not measured yet
     public static double TRIM_STEP = 25;           // ticks/s per operator D-pad press
     /*
      * Octave launcher check (2026-10-26, v4: 96 mm Hogback drives the ball, Runway v10 70 degree exit).
@@ -80,13 +89,13 @@ public class LauncherSubsystem {
      * at 0.45 x the Hogback tread speed: film one shot at 1179 (the model says 18.75 ft/s) and set
      * SPEED_SCALE = 18.75 / measured ft/s (1.2 if it leaves at 0.375 x, the older estimate).
      * ZONE_MIN/MAX_RANGE_IN: that zone in the SDK's ftcPose.range (hypot(x, y): it leaves out the
-     * camera's z), about 51.0-66.7 in with the camera tilted 38 degrees, 52.9-67.0 in at 45.
+     * camera's z), about 55.0-67.8 in with the camera tilted 50 degrees and the lens 11.25 in up.
      * FEED_MAX_OVER: also don't feed above (target + this), e.g. right after a spin-up overshoot,
      * because a too-fast ball flies long. 30 = the one-speed window; FEED_MARGIN is the low side.
      */
     public static double SPEED_SCALE = 1.0;
-    public static double ZONE_MIN_RANGE_IN = 51;
-    public static double ZONE_MAX_RANGE_IN = 67;
+    public static double ZONE_MIN_RANGE_IN = 55;
+    public static double ZONE_MAX_RANGE_IN = 68;
     public static double FEED_MAX_OVER = 30;
     /*
      * SMOOTH MODE (new LauncherSubsystem(hardwareMap, true), used by the tank TeleOp): our own speed
@@ -108,10 +117,12 @@ public class LauncherSubsystem {
     // spin-up takes about 0.8 s to ~3000 RPM and about 1.2 s to the far-shot speed, so 1.5 s still covers it.
     public static double SPINUP_SECONDS = 1.5;
     /*
-     * PULSE FEEDING (setPulseFeed(true), used by the tank TeleOp): while shooting is held, the windmill
+     * PULSE FEEDING (setPulseFeed(true), used by the Auto programs): while shooting is held, the windmill
      * feeds in turns so it keeps launching. First it waits for the launcher to reach speed, then:
      * feed FEED_ON_SECONDS, pause at least FEED_OFF_SECONDS so the flywheel recovers, then feed again
      * once it is back at speed, or after RECOVER_MAX_SECONDS at most (so it never stalls).
+     * CONTINUOUS FEEDING (setContinuousFeed(true), used by both TeleOps and the Range Test): it waits for the launcher
+     * to reach speed once, then keeps feeding without a pause until shooting is released.
      */
     public static double FEED_ON_SECONDS = 0.3;
     public static double FEED_OFF_SECONDS = 0.3;
@@ -119,10 +130,10 @@ public class LauncherSubsystem {
 
     private final boolean enabled = RobotSwitches.USE_LAUNCHER;
     private DcMotorEx launcher;
-    //private CRServo windmill;
+    private CRServo windmill;
     private CRServo feedWheel;   // null when the configuration has no "feedWheel"
-    private DcMotorEx roller;
-
+    private DcMotor roller;      // null when the configuration has no roller motor
+    private String rollerName = null;
     private boolean feeding = false;
     // The PIDF numbers the motor has now (NaN = never sent), and the speed it was last asked for.
     private final PIDFCoefficients sentPidf = new PIDFCoefficients(Double.NaN, Double.NaN, Double.NaN, Double.NaN);
@@ -141,6 +152,7 @@ public class LauncherSubsystem {
     // Pulse feeding: on or off, the step it is in, and how long it has been in that step.
     private enum FeedStep { SPIN_UP, FEED, RECOVER }
     private boolean pulseFeed = false;
+    private boolean continuousFeed = false;
     private FeedStep feedStep = FeedStep.SPIN_UP;
     private final ElapsedTime feedTimer = new ElapsedTime();
     // TeleOp: launcher on or off (the operator's button), and whether it has reached speed since then.
@@ -167,11 +179,19 @@ public class LauncherSubsystem {
         // The mecanum robot's configuration calls it "windmillServo", the tank robot's "windmill".
         // Neither in the configuration = no windmill: the launcher still spins, feeding moves nothing.
         CRServo found = hardwareMap.tryGet(CRServo.class, "windmillServo");
-        //windmill = found != null ? found : hardwareMap.tryGet(CRServo.class, "windmill");
-        roller = hardwareMap.get(DcMotorEx.class, "roller");
-        roller.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+        windmill = found != null ? found : hardwareMap.tryGet(CRServo.class, "windmill");
         feedWheel = hardwareMap.tryGet(CRServo.class, "feedWheel");
-
+        // The roller motor: the first of these names that is a MOTOR in the configuration.
+        for (String name : new String[] {"roller", "windmill", "windmillServo"}) {
+            roller = hardwareMap.tryGet(DcMotor.class, name);
+            if (roller != null) {
+                rollerName = name;
+                roller.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+                roller.setDirection(DcMotorSimple.Direction.REVERSE);
+                roller.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);   // stop at once: no extra ball
+                break;
+            }
+        }
 
         if (smooth) {
             // We set the power ourselves; the encoder still counts and getVelocity() still works.
@@ -184,23 +204,21 @@ public class LauncherSubsystem {
         }
 
         setFeedPower(false);
-        if (roller != null) {
-
-            //windmill.setDirection(DcMotorSimple.Direction.REVERSE);
-            roller.setDirection(DcMotorSimple.Direction.REVERSE);
-
+        if (windmill != null) {
+            windmill.setDirection(DcMotorSimple.Direction.REVERSE);
         }
     }
 
-    // The windmill and the feed wheel feed together.
+    // The windmill, the feed wheel and the roller feed together.
     private void setFeedPower(boolean feed) {
-        //if (windmill != null) {
-          //  windmill.setPower(feed ? WINDMILL_POWER : 0);
-        roller.setPower(feed ? 1 : 0);
-
-
+        if (windmill != null) {
+            windmill.setPower(feed ? WINDMILL_POWER : 0);
+        }
         if (feedWheel != null) {
             feedWheel.setPower(feed ? FEED_WHEEL_POWER : 0);
+        }
+        if (roller != null) {
+            roller.setPower(feed ? ROLLER_POWER : 0);
         }
     }
 
@@ -208,13 +226,42 @@ public class LauncherSubsystem {
         return enabled;
     }
 
+    // The roller motor alone, for telemetry: FEEDING / stopped and its power, or why it isn't there.
+    public String getRollerText() {
+        if (!enabled) {
+            return "OFF (RobotSwitches.USE_LAUNCHER = false)";
+        }
+        if (roller == null) {
+            return "NOT FOUND: name the roller motor \"roller\" in the configuration";
+        }
+        double power = roller.getPower();
+        return String.format(Locale.US, "\"%s\" %s, power %.2f (ROLLER_POWER %.2f)",
+                rollerName, power != 0 ? "FEEDING" : "stopped", power, ROLLER_POWER);
+    }
+
+    // Which feeders were found in the configuration, for telemetry.
+    public String getFeederText() {
+        if (!enabled) {
+            return "OFF";
+        }
+        StringBuilder s = new StringBuilder();
+        if (roller != null) {
+            s.append(String.format(Locale.US, "roller motor \"%s\" (power %.2f)", rollerName, roller.getPower()));
+        }
+        if (windmill != null) {
+            s.append(s.length() > 0 ? ", " : "").append("windmill servo");
+        }
+        if (feedWheel != null) {
+            s.append(s.length() > 0 ? ", " : "").append("feedWheel servo");
+        }
+        return s.length() > 0 ? s.toString()
+                : "NONE: no motor named \"roller\" in the configuration, feeding moves nothing";
+    }
+
     // Which way the windmill turns (REVERSE by default). For a robot whose windmill is mounted the other way.
     public void setWindmillDirection(DcMotorSimple.Direction direction) {
-        if (enabled && roller  != null) {
-
-            //windmill.setDirection(direction);
-            roller.setDirection(direction);
-
+        if (enabled && windmill != null) {
+            windmill.setDirection(direction);
         }
     }
 
@@ -241,6 +288,13 @@ public class LauncherSubsystem {
     public void toggleOn() {
         if (enabled) {
             on = !on;
+        }
+    }
+
+    // Auto launch (LaunchAssist.autoLaunch()): turn the launcher on or off without the operator's button.
+    public void setOn(boolean wanted) {
+        if (enabled) {
+            on = wanted;
         }
     }
 
@@ -295,9 +349,6 @@ public class LauncherSubsystem {
         if (on && "REVERSE".equals(getDirection())) {
             telemetry.addLine("WARNING: the flywheel spins BACKWARD");
         }
-        telemetry.addData("Roller is On", roller.getPower());
-        telemetry.addData("Roller velocity", roller.getVelocity());
-
     }
 
     // The flywheel speed for a CELL this far away: the straight line through NEAR and FAR, held at the
@@ -344,7 +395,11 @@ public class LauncherSubsystem {
             return;
         }
         setTarget(shoot ? getShootTarget() : 0);
-        feeding = pulseFeed ? pulseFeeding(shoot) : shoot && isAtSpeed();
+        if (continuousFeed) {
+            feeding = continuousFeeding(shoot);
+        } else {
+            feeding = pulseFeed ? pulseFeeding(shoot) : shoot && isAtSpeed();
+        }
         setFeedPower(feeding);
     }
 
@@ -355,6 +410,9 @@ public class LauncherSubsystem {
         }
         setTarget(getShootTarget());
         feeding = false;
+        // The next feed press starts by waiting for speed again. Without this, a press long after the last
+        // pulse skipped the wait (RECOVER_MAX_SECONDS had already passed) and fed below speed.
+        feedStep = FeedStep.SPIN_UP;
         setFeedPower(false);
     }
 
@@ -393,6 +451,23 @@ public class LauncherSubsystem {
     // true = feed in timed pulses while shooting is held (see PULSE FEEDING above).
     public void setPulseFeed(boolean on) {
         pulseFeed = on;
+    }
+
+    // true = keep feeding once at speed, with no pauses, until shooting is released (see above).
+    public void setContinuousFeed(boolean on) {
+        continuousFeed = on;
+    }
+
+    // One step of continuous feeding; returns true while the windmill should feed.
+    private boolean continuousFeeding(boolean shoot) {
+        if (!shoot) {
+            feedStep = FeedStep.SPIN_UP;
+            return false;
+        }
+        if (feedStep == FeedStep.SPIN_UP && isAtSpeed()) {
+            startFeedStep(FeedStep.FEED);
+        }
+        return feedStep == FeedStep.FEED;
     }
 
     // One step of pulse feeding; returns true while the windmill should feed.
