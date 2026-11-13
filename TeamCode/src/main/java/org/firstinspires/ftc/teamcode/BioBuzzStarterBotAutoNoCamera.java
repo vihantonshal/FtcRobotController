@@ -5,6 +5,7 @@ import com.acmerobotics.dashboard.config.Config;
 import com.acmerobotics.dashboard.telemetry.MultipleTelemetry;
 import com.qualcomm.hardware.lynx.LynxModule;
 import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
+import com.qualcomm.robotcore.eventloop.opmode.Disabled;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
@@ -49,6 +50,7 @@ import java.util.Locale;
  */
 @Config
 @Autonomous(name = "BioBuzz StarterBot Auto (No Camera)", group = "StarterBot")
+@Disabled
 public class BioBuzzStarterBotAutoNoCamera extends OpMode {
 
     // ---- The launch spot, from where the robot stood at INIT ----

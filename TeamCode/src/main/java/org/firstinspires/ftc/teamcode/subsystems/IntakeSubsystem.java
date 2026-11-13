@@ -56,7 +56,8 @@ public class IntakeSubsystem {
         // The right servo faces the other way, so it is reversed: both pull balls in together.
         leftServo.setPower(0);
         rightServo.setPower(0);
-        rightServo.setDirection(DcMotorSimple.Direction.REVERSE);
+        leftServo.setDirection(DcMotorSimple.Direction.REVERSE);
+        rightServo.setDirection(DcMotorSimple.Direction.FORWARD);
     }
 
     public boolean isEnabled() {

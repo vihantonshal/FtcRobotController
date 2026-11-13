@@ -3,6 +3,7 @@ package org.firstinspires.ftc.teamcode;
 import com.acmerobotics.dashboard.FtcDashboard;
 import com.acmerobotics.dashboard.config.Config;
 import com.acmerobotics.dashboard.telemetry.MultipleTelemetry;
+import com.qualcomm.robotcore.eventloop.opmode.Disabled;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.util.ElapsedTime;
@@ -37,6 +38,7 @@ import org.firstinspires.ftc.teamcode.subsystems.LauncherSubsystem;
  */
 @Config
 @TeleOp(name = "Launcher Test", group = "StarterBot")
+@Disabled
 public class BioBuzzLauncherTest extends OpMode {
 
     // > 0: pretend the camera sees a CELL this far away (inches), to test the distance speed

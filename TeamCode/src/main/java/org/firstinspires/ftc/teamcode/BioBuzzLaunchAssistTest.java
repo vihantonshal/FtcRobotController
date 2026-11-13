@@ -2,6 +2,7 @@ package org.firstinspires.ftc.teamcode;
 
 import com.acmerobotics.dashboard.FtcDashboard;
 import com.acmerobotics.dashboard.telemetry.MultipleTelemetry;
+import com.qualcomm.robotcore.eventloop.opmode.Disabled;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 
@@ -41,6 +42,7 @@ import org.firstinspires.ftc.vision.apriltag.AprilTagClusterDetection;
  *   Changes work at once. They are lost when the robot restarts: copy the keepers into the .java files.
  */
 @TeleOp(name = "Launch Assist Test", group = "StarterBot")
+@Disabled
 public class BioBuzzLaunchAssistTest extends OpMode {
 
     // Its own log, so test launches never become TeleOp launch poses. Built-in poses are still loaded.

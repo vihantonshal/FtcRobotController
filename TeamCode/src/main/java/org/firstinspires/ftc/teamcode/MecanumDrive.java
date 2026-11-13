@@ -1,5 +1,8 @@
 package org.firstinspires.ftc.teamcode;
 
+import com.acmerobotics.dashboard.DashboardCore;
+import com.acmerobotics.dashboard.FtcDashboard;
+import com.acmerobotics.dashboard.telemetry.TelemetryPacket;
 import com.qualcomm.hardware.bosch.BHI260IMU;
 import com.qualcomm.hardware.digitalchickenlabs.OctoQuad;
 import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
@@ -38,12 +41,15 @@ public class MecanumDrive {
     String frDrive = "front_right_motor";
     String blDrive = "back_left_motor";
     String brDrive = "back_right_motor";
+    private FtcDashboard dashboard;
 
     public MecanumDrive(HardwareMap hardwareMap, Telemetry telemetry){
         this.hardwareMap = hardwareMap;
         this.telemetry = telemetry;
     }
     public void init() {
+        dashboard = FtcDashboard.getInstance();
+
         frontLeftDrive = hardwareMap.get(DcMotor.class, flDrive);
         frontRightDrive = hardwareMap.get(DcMotor.class, frDrive);
         backLeftDrive = hardwareMap.get(DcMotor.class, blDrive);
@@ -496,4 +502,21 @@ else {
         backRightDrive.setPower(power);
     }
 
+    public  void PushToDashboard(String stateMachineState, int shotsToFire, int recoveryTime, double droppedRPM, double targetedRPM, double currentRPM ){
+        TelemetryPacket metrics = new TelemetryPacket();
+        metrics.put("Launcher State", stateMachineState);
+
+        metrics.put("Shots", shotsToFire);
+        metrics.put("Dropped RPM", droppedRPM);
+        metrics.put("Recovery Time", recoveryTime);
+        metrics.put("Targeted RPM", targetedRPM);
+        metrics.put("Current RPM", currentRPM);
+
+        dashboard.sendTelemetryPacket(metrics);
+    }
+    public  void PushToDashboard(TelemetryPacket metrics){
+
+
+        dashboard.sendTelemetryPacket(metrics);
+    }
 }

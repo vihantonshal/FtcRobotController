@@ -131,11 +131,12 @@ public class AprilTagVision {
      * The camera must look the same way the ball flies (in CAD the Julia Runway v6 throws toward the
      * robot's FRONT, the intake side): if it looks the other way, aiming turns the launcher away from the HIVE.
      */
-    // Front C270 mount (Camera Mount C270 Clip Front): looking forward, the launcher is 140 mm to the
-    // RIGHT of the lens and the v6 release point 52 mm (2.0 in) BEHIND it.
-    // (Back-launch Runway v5 with the rear clip mount was -5.5 / 0.4.)
-    public static double LAUNCHER_OFFSET_RIGHT_IN = 5.5;
-    public static double LAUNCHER_OFFSET_FORWARD_IN = -2.0;
+    // Camera on the RIGHT-side drivetrain U-bracket, about 8.5 in back from the front of the 18 in robot,
+    // looking forward. The launcher is at the BACK END on the robot's center line, so it is LEFT of the
+    // lens (about 8 in) and BEHIND it (about 8.5 in). ESTIMATES: tape-measure lens to launcher center line
+    // and lens to release point, then set these. (Old front clip mount was +5.5 / -2.0.)
+    public static double LAUNCHER_OFFSET_RIGHT_IN = -8.0;
+    public static double LAUNCHER_OFFSET_FORWARD_IN = -8.5;
     /*
      * When only one CELL of a HIVE is in view, it counts as up only above this height. The up CELL's
      * opening is about 53.5-65.6 in. above the TILES. Check it on a real field: read the "height"
@@ -471,8 +472,10 @@ public class AprilTagVision {
      * simulation: range 56.8 in at 50 degrees tilt with the front 15 in from the stand). Only right when
      * the robot faces the CELL square. Check once: tape-measure intake to stand, then
      * STAND_OFFSET_IN = range - tape.
+     * 46.5 = ESTIMATE for the lens 8.5 in back on the right U-bracket (range ~61.5 in with the front 15 in
+     * from the stand); 41.8 was the old front mount. Replace with the tape check above.
      */
-    public static double STAND_OFFSET_IN = 41.8;
+    public static double STAND_OFFSET_IN = 46.5;
 
     public double intakeToStandInches(AprilTagDetection cell) {
         return cell.ftcPose.range - STAND_OFFSET_IN;

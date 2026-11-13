@@ -3,6 +3,7 @@ package org.firstinspires.ftc.teamcode;
 import com.acmerobotics.dashboard.FtcDashboard;
 import com.acmerobotics.dashboard.config.Config;
 import com.acmerobotics.dashboard.telemetry.MultipleTelemetry;
+import com.qualcomm.robotcore.eventloop.opmode.Disabled;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 
@@ -69,6 +70,7 @@ adb pull /sdcard/FIRST/BioBuzz/launcher_range_test.csv
  */
 @Config
 @TeleOp(name = "Launcher Range Test", group = "StarterBot")
+@Disabled
 public class BioBuzzLauncherRangeTest extends OpMode {
 
     public static final String LOG_PATH = "BioBuzz/launcher_range_test.csv";
@@ -314,7 +316,6 @@ public class BioBuzzLauncherRangeTest extends OpMode {
         telemetry.addData("Roller", launcher.getRollerText());
         telemetry.addData("Drive", drive != null ? drive.getModeText() : "off: place the robot by hand (USE_DRIVE)");
         telemetry.addData("Shot", message.isEmpty() ? "-" : message);
-
         telemetry.addData("Shots logged", "%d (%s)", shotCount, fileProblem != null ? fileProblem : LOG_PATH);
         telemetry.addLine("Results (hits / shots):");
         List<String> keys = new ArrayList<>(results.keySet());

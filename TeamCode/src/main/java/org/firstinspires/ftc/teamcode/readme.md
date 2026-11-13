@@ -129,3 +129,10 @@ Note: Some names start with "Team" and others start with "team".  This is intent
 5)  Add:    include ':Team0417' to the "/settings.gradle" file.
     
 6)  Open up Android Studios and clean out any old files by using the menu to "Build/Clean Project""
+
+
+##### FTC Dashboard
+
+    192.168.49.1:8080/dash
+Control Hub: 192.168.43.1
+http://192.168.43.1:8080/dash

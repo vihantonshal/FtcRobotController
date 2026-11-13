@@ -62,6 +62,10 @@ public class LaunchAssist {
     public static double TAG_RANGE_TOL_IN = 2;
     public static double TAG_BEARING_TOL_DEG = 2;
     public static double TAG_YAW_TOL_DEG = 4;
+    // true: the target is the saved shot at the next LOWER range (closer to the HIVE, so the robot
+    // drives in), counting shots up to TAG_RANGE_TOL_IN above "now" as lower so a small overshoot
+    // doesn't jump to an even closer one. No lower shot saved: the nearest one. false: always the nearest.
+    public static boolean PREFER_LOWER_RANGE = true;
     // Auto-align: drive power per inch or degree of error, and the most power it may use.
     public static double ALIGN_KP_DIST = 0.05;
     public static double ALIGN_KP_TURN = 0.015;
@@ -123,6 +127,9 @@ public class LaunchAssist {
         public boolean tagMode = false;
         public String text = "no saved launch poses yet (operator B saves a good shot)";
         public double forward = 0, strafe = 0, rotate = 0;
+        // The saved pose picked as the target: its number ("Pose N" on FTC Dashboard, 0 = none) and values.
+        public int targetPose = 0;
+        public double targetRange = 0, targetBearing = 0, targetYaw = 0;
     }
 
     // Switched on and off with RobotSwitches.USE_LAUNCH_ASSIST. When it is off, nothing is read or
@@ -423,6 +430,10 @@ public class LaunchAssist {
         }
         st.hasTarget = true;
         st.tagMode = true;
+        st.targetPose = successes.indexOf(target) + 1;
+        st.targetRange = target.tagRange;
+        st.targetBearing = target.tagBearing;
+        st.targetYaw = target.tagYaw;
         double eRange = now.tagRange - target.tagRange;         // + = too far away
         double eBearing = now.tagBearing - target.tagBearing;   // + = tag too far left
         double eYaw = now.tagYaw - target.tagYaw;
@@ -431,18 +442,20 @@ public class LaunchAssist {
         st.forward = cap(ALIGN_KP_DIST * eRange);
         st.rotate = cap(-ALIGN_KP_TURN * eBearing);   // + rotate turns right
         st.strafe = canStrafe ? cap(YAW_STRAFE_SIGN * ALIGN_KP_YAW * eYaw) : 0;
-        String move = String.format(Locale.US, "%s: %s %.1f in, turn %.0f° %s", now.tag,
+        String move = String.format(Locale.US, "%s pose #%d (%.1f in): %s %.1f in, turn %.0f° %s", now.tag,
+                st.targetPose, target.tagRange,
                 eRange > 0 ? "move in" : "back up", Math.abs(eRange), Math.abs(eBearing), eBearing > 0 ? "left" : "right");
         st.text = st.ok
-                ? String.format(Locale.US, "OK (%s)", now.tag)
+                ? String.format(Locale.US, "OK (%s pose #%d)", now.tag, st.targetPose)
                 : canStrafe ? move + String.format(Locale.US, ", angle off %.0f°", eYaw) : move;
         return st;
     }
 
     // The saved success for the same HIVE CELL that is closest in distance and angle, or null.
+    // With PREFER_LOWER_RANGE: the closest one at a lower range (see PREFER_LOWER_RANGE), if any.
     private Snapshot nearest(Snapshot now) {
-        Snapshot best = null;
-        double bestScore = Double.MAX_VALUE;
+        Snapshot best = null, bestLower = null;
+        double bestScore = Double.MAX_VALUE, bestLowerScore = Double.MAX_VALUE;
         for (Snapshot s : successes) {
             if (!now.sameTag(s)) {
                 continue;
@@ -452,8 +465,12 @@ public class LaunchAssist {
                 bestScore = score;
                 best = s;
             }
+            if (s.tagRange <= now.tagRange + TAG_RANGE_TOL_IN && score < bestLowerScore) {
+                bestLowerScore = score;
+                bestLower = s;
+            }
         }
-        return best;
+        return PREFER_LOWER_RANGE && bestLower != null ? bestLower : best;
     }
 
     private static double cap(double v) {

@@ -20,16 +20,23 @@ package org.firstinspires.ftc.teamcode.subsystems;
  *  USE_FIELD_CENTRIC  TeleOp only: false = always robot-centric (stick up = the robot's front),
  *                and the driver's Y button does nothing. true = Y switches field-centric on/off
  *                (needs the "imu"), and FIELD_CENTRIC_AT_START picks the mode at INIT.
+ *  USE_RANGE_SPEED  TeleOp only: true = the flywheel speed follows the camera's AprilTag range to
+ *                the up CELL (LauncherSubsystem NEAR/FAR line). false = one fixed speed,
+ *                LauncherSubsystem.TARGET_VELOCITY. The Driver Hub "Shot speed" line shows
+ *                BY RANGE or FIXED. The Auto always uses its fixed speed.
  */
 public final class RobotSwitches {
     public static final boolean USE_DRIVE = true;
     public static final boolean USE_INTAKE = true;
     public static final boolean USE_LAUNCHER = true;
-    public static final boolean USE_CAMERA = true;
+    public static final boolean USE_CAMERA = false;   // camera removed 2026-11-12 (old: true)
     public static final boolean USE_LIMELIGHT = false;
     public static final boolean USE_DASHBOARD = true;
-    public static final boolean USE_LAUNCH_ASSIST = true;
+    public static final boolean USE_LAUNCH_ASSIST = false;
     public static final boolean USE_FIELD_CENTRIC = false;
+    // false: TeleOp uses one fixed speed (TARGET_VELOCITY). Camera removed 2026-11-12, so there is no range.
+    // true = flywheel speed by camera AprilTag range (NEAR/FAR line); needs USE_CAMERA = true.
+    public static final boolean USE_RANGE_SPEED = false;
 
     private RobotSwitches() {
     }

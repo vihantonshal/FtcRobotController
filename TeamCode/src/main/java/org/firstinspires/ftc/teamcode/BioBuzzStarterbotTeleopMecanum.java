@@ -37,6 +37,7 @@ import org.firstinspires.ftc.teamcode.subsystems.LaunchAssist;
 import org.firstinspires.ftc.teamcode.subsystems.LauncherSubsystem;
 import org.firstinspires.ftc.teamcode.subsystems.MecanumDriveSubsystem;
 import org.firstinspires.ftc.teamcode.subsystems.RobotSwitches;
+import org.firstinspires.ftc.teamcode.subsystems.TeleopLog;
 import org.firstinspires.ftc.vision.apriltag.AprilTagClusterDetection;
 
 /*
@@ -61,19 +62,20 @@ import org.firstinspires.ftc.vision.apriltag.AprilTagClusterDetection;
  *            is tilted up ("HIVE up"). Not picked: the target is the up CELL the robot points at.
  *  DRIVER    left stick: drive and strafe         right stick X: turn
  *            left bumper (hold): turn toward the up CELL opening (AprilTag cluster)
- *            right bumper (hold): AUTO LAUNCH: spin up, drive to the nearest saved good launch pose
- *                                 for the up CELL, then launch until released. Needs that CELL in
- *                                 view. (D-pad up instead when TWO_DRIVERS is false; LaunchAssist.
- *                                 AUTO_LAUNCH = false makes it drive only.)
  *            Driving is robot-centric: stick up = the way the robot's front faces.
- *            A (hold): feed balls; once the launcher is at speed the roller runs without stopping
- *                      until A is released
+ *            The driver never launches: A and the right bumper do nothing.
  *            X: slow mode on/off (for lining up)
  *            Y: field-centric on/off, ONLY when RobotSwitches.USE_FIELD_CENTRIC is true (it is
  *               false now, so Y does nothing)
  *            back/share: field-centric only, reset "forward" to the way the robot faces now
  *  OPERATOR  right trigger: intake in             left trigger: intake out
  *            right bumper: launcher on/off (it keeps spinning; the gamepad rumbles when ready)
+ *            A (hold): feed balls = launch; once the launcher is at speed the roller runs without
+ *                      stopping until A is released
+ *            D-pad up (hold): AUTO LAUNCH: spin up, drive to the nearest saved good launch pose for
+ *                             the up CELL, then launch until released. Needs that CELL in view. While
+ *                             held the robot drives itself (driver sticks ignored). LaunchAssist.
+ *                             AUTO_LAUNCH = false makes it drive only.
  *            D-pad right/left: launcher a bit faster/slower (practice trim; the speed also follows
  *                              the distance to the up CELL, see LauncherSubsystem)
  *            B: the last launch scored, save its pose as a good launch pose
@@ -96,8 +98,10 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
 
     // true: gamepad2 runs the intake and launcher. false: one person does everything on gamepad1.
     public static boolean TWO_DRIVERS = true;
-    // How long the operator's gamepad rumbles when the launcher is ready, in milliseconds.
-    public static int READY_RUMBLE_MS = 300;
+
+    // How many short buzzes the operator's gamepad gives when the flywheel reaches its target speed
+    // (once per launcher-on). Old: one 300 ms rumble (READY_RUMBLE_MS = 300).
+    public static int READY_RUMBLE_BLIPS = 3;
     // true: camera picture only (HDMI monitor and FTC Dashboard), no AprilTags and no exposure / gain
     // settings, like Camera Test's PLAIN_CAMERA. Aim, distance speed and launch assist then see nothing.
     // Set it in Dashboard BEFORE pressing INIT. Keep it false for matches.
@@ -118,6 +122,7 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
     private LauncherSubsystem launcher = null;
     private AprilTagVision vision = null;
     private LaunchAssist launchAssist = null;
+    private TeleopLog teleopLog = null;      // /sdcard/FIRST/BioBuzz/teleop_log.csv: target picked, align, feed
     private final CellSightRumble cellRumble = new CellSightRumble();
 
     /*
@@ -143,12 +148,16 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
         drive = new MecanumDriveSubsystem(hardwareMap);
         intake = new IntakeSubsystem(hardwareMap);
         launcher = new LauncherSubsystem(hardwareMap);
-        // The roller runs without pausing while the driver holds A, once the launcher has reached speed. The Octave
+        // Flywheel speed: RobotSwitches.USE_RANGE_SPEED true = by the camera's AprilTag range to the up
+        // CELL (NEAR/FAR line), false = fixed TARGET_VELOCITY. Change it in RobotSwitches, then rebuild.
+        launcher.setDistanceSpeed(RobotSwitches.USE_RANGE_SPEED);
+        // The roller runs without pausing while the operator holds A, once the launcher has reached speed. The Octave
         // launcher check only tested balls 0.42 s or more apart; closer ones can knock each other out of
         // the CELL. If that happens, go back to launcher.setPulseFeed(true) (about 0.6 s per ball).
         launcher.setContinuousFeed(true);
         vision = new AprilTagVision(hardwareMap, true, PLAIN_CAMERA);
         launchAssist = new LaunchAssist();   // loads the good launch poses saved in earlier runs
+        teleopLog = new TeleopLog();
 
         if (SHOW_TELEMETRY) {
             telemetry.addData("Status", "Initialized");
@@ -234,7 +243,8 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
             drive.resetHeading();            // field-centric: "forward" = the way the robot faces now
         }
 
-        boolean alignHeld = TWO_DRIVERS ? driver.right_bumper : driver.dpad_up;
+        // Only the OPERATOR launches. D-pad up, because the operator's right bumper is launcher on/off.
+        boolean alignHeld = operator.dpad_up;
         boolean aligning = alignHeld && pose.hasTarget;
         if (aligning) {
             // The robot drives itself to the nearest good launch pose.
@@ -245,7 +255,7 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
         } else {
             drive.driveWithSticks(driver);
         }
-        launchAssist.rumbleWhenAligned(driver, aligning);        // "you're there"
+        launchAssist.rumbleWhenAligned(operator, aligning);      // "you're there", to the one holding D-pad up
 
         // ---------------- 3. OPERATOR ----------------
         if (operator.rightBumperWasPressed()) {
@@ -256,23 +266,29 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
         }
         if (operator.dpadLeftWasPressed()) {
             launcher.adjustTrim(-1);         // a bit slower
-        }
-        boolean autoFeed = launchAssist.autoLaunch(alignHeld, launcher);   // flywheel on, feed once the pose is OK
-        launcher.run(driver.a || autoFeed);  // off, spinning, or feeding
+        }        boolean autoFeed = launchAssist.autoLaunch(alignHeld, launcher);   // flywheel on, feed once the pose is OK
+        boolean feedHeld = operator.a || autoFeed;
+        launcher.run(feedHeld);                // off, spinning, or feeding
+        teleopLog.update(cell, pose, aligning, launcher, feedHeld);   // log: target picked, align, why (not) feeding
         if (launcher.justBecameReady()) {
-            operator.rumble(READY_RUMBLE_MS);
+            operator.rumbleBlips(READY_RUMBLE_BLIPS);   // 3 buzzes = flywheel at speed, press A
         }
-        if (driver.aWasPressed() && launcher.isOn()) {
-            launchAssist.recordLaunch();     // each A press is one launch in the log
+        if (operator.aWasPressed() && launcher.isOn()) {
+            launchAssist.recordLaunch();     // each operator A press is one launch in the log
         }
         if (operator.bWasPressed()) {
             launchAssist.saveLastLaunch(operator);   // "that one scored"
         }
-        intake.runTeleop(operator.right_trigger - operator.left_trigger, launcher.isFeeding());
+        // Triggers only: feeding (A) spins just the launcher's roller, not the intake (no feed help).
+        intake.runTeleop(operator.right_trigger - operator.left_trigger, false);
 
         // ---------------- 4. Telemetry ----------------
         vision.addReadingLine(telemetry, cell);   // range, bearing, yaw, intake to stand
         showLaunchLines(aligning);           // always, also in competition
+        telemetry.addData("Feed (A)", launcher.feedState(feedHeld));   // why the roller is or isn't feeding
+        if (teleopLog.getProblem() != null) {
+            telemetry.addData("TeleOp log", teleopLog.getProblem());
+        }
         if (SHOW_TELEMETRY) {
             showTelemetry(cell, driver);
         }
@@ -339,6 +355,9 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
         }
         if (vision != null) {
             vision.close();
+        }
+        if (teleopLog != null) {
+            teleopLog.close();
         }
     }
 }

@@ -93,11 +93,12 @@ public class MecanumDriveSubsystem {
      *   Upright on the robot's RIGHT side, logo out: HUB_LOGO = RIGHT, HUB_USB = UP, DOWN, FORWARD or BACKWARD
      * Check: in the Auto's INIT, turn the robot left by hand; "Heading" must go up. If it goes down
      * or barely moves, these two are wrong. roadrunner/MecanumDrive PARAMS needs the same values.
+     * Our robot: upright on its side, logo toward the robot's LEFT, USB ports pointing DOWN.
      */
     public static RevHubOrientationOnRobot.LogoFacingDirection HUB_LOGO =
-            RevHubOrientationOnRobot.LogoFacingDirection.UP;
+            RevHubOrientationOnRobot.LogoFacingDirection.LEFT;
     public static RevHubOrientationOnRobot.UsbFacingDirection HUB_USB =
-            RevHubOrientationOnRobot.UsbFacingDirection.FORWARD;
+            RevHubOrientationOnRobot.UsbFacingDirection.DOWN;
 
     // RobotSwitches.USE_DRIVE: when false the motors are never looked up, nothing moves, and every
     // Auto move (driveDistance, driveToPoint, turnToHeading, turnToCell...) counts as done at once.

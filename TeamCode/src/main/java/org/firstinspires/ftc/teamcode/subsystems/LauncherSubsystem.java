@@ -29,8 +29,10 @@ adb pull /sdcard/FIRST/BioBuzz/launcher_range_test.csv
  * The windmill only feeds once the launcher is within FEED_MARGIN of its target speed, so every ball
  * gets a good throw.
  *
- * RUNWAY v10 (70 degree exit): USE_DISTANCE_SPEED is OFF and the launcher runs at one speed,
- * TARGET_VELOCITY x SPEED_SCALE, plus the operator's trim. The rest of this paragraph is for a 77 degree runway.
+ * RUNWAY v10 (70 degree exit): USE_DISTANCE_SPEED is OFF, so the Auto and tests run at one speed,
+ * TARGET_VELOCITY x SPEED_SCALE, plus the operator's trim. The mecanum TeleOp turns distance speed on for
+ * itself (setDistanceSpeed()), with a NEAR/FAR line fitted to saved good launches. The simulation notes
+ * below (NEAR 54.4 / FAR 89.9 in) were for a 77 degree runway.
  * DISTANCE-BASED SPEED: a farther CELL needs a faster flywheel. Every loop the OpMode passes the
  * distance to the up CELL from the camera (webcam or Limelight) to setCellRange(). The target speed
  * then follows a straight line through two measured points, NEAR (NEAR_RANGE_IN, NEAR_VELOCITY) and
@@ -58,11 +60,17 @@ adb pull /sdcard/FIRST/BioBuzz/launcher_range_test.csv
 @Config
 public class LauncherSubsystem {
     // ---- Tuning numbers (owner: launcher team) ----
-    public static PIDFCoefficients PIDF = new PIDFCoefficients(40, 0, 0, 12.5);   // p, i, d, f
+    // Old (goBILDA StarterBot): new PIDFCoefficients(40, 0, 0, 12.5). With f 12.5 the flywheel settled
+    // 30-70 ticks/s short of the target (teleop_log.csv, 2026-11-11), so f is raised about 8%. If it now
+    // goes more than FEED_MAX_OVER above the target and stays there, lower f by 0.25 at a time.
+    public static PIDFCoefficients PIDF = new PIDFCoefficients(40, 0, 0, 13.5);   // p, i, d, f
     // Runway v10 (70 degree exit): ONE speed for the whole shooting zone (see "Octave launcher check" below).
     // About 2526 RPM. With USE_DISTANCE_SPEED = true it is only used until the camera sees a CELL.
     public static double TARGET_VELOCITY = 1179;
-    public static double FEED_MARGIN = 25;         // feed only above (target - this), e.g. 1225 for 1250
+    // Feed only above (target - this). 50 = goBILDA's own StarterBot rule (target 1250, min 1200): with
+    // PIDF (40, 0, 0, 12.5) the flywheel settles about 30-70 ticks/s short of the target, and 25 left the
+    // roller waiting (teleop_log.csv, 2026-11-11).
+    public static double FEED_MARGIN = 50;
     public static double WINDMILL_POWER = 1.0;
     // The feed wheel (CR servo "feedWheel" beside the Runway lead-in) runs whenever the windmill does.
     // Seen from above it must turn clockwise so it pushes the ball toward the launcher: -1.0 if it turns the wrong way.
@@ -73,13 +81,15 @@ public class LauncherSubsystem {
     // launcher, set ROLLER_POWER negative (in FTC Dashboard to try it, then here).
     public static double ROLLER_POWER = 1.0;
     // Distance-based speed (see the top of this file). Ranges in inches, speeds in ticks/s.
-    // OFF for Runway v10: at 70 degrees the right speed hardly changes with distance. NEAR/FAR are the
-    // Runway v6 (77 degree) line: set true again only with a 77 degree runway on the robot.
-    public static boolean USE_DISTANCE_SPEED = true;
-    public static double NEAR_RANGE_IN = 54.4;     // about 0.75 m along the floor (see the top of this file)
-    public static double NEAR_VELOCITY = 1381;     // starting point from the simulation (v6 front launch), not measured yet
-    public static double FAR_RANGE_IN = 89.9;      // about 2 m along the floor
-    public static double FAR_VELOCITY = 1594;      // starting point from the simulation (v6 front launch), not measured yet
+    // USE_DISTANCE_SPEED turns it on for EVERY OpMode (Auto, tests). The TeleOp turns it on only for
+    // itself with setDistanceSpeed(true) (RobotSwitches.USE_RANGE_SPEED).
+    public static boolean USE_DISTANCE_SPEED = false;
+    // Runway v10 line, fitted to the 11 SUCCESS shots in launch_poses_default.csv (range 67-83 in,
+    // 1180-1240 ticks/s): about +2.3 ticks/s per inch. Re-fit when more good launches are saved.
+    public static double NEAR_RANGE_IN = 67;
+    public static double NEAR_VELOCITY = 1186;
+    public static double FAR_RANGE_IN = 83;
+    public static double FAR_VELOCITY = 1223;
     public static double TRIM_STEP = 25;           // ticks/s per operator D-pad press
     /*
      * Octave launcher check (2026-10-26, v4: 96 mm Hogback drives the ball, Runway v10 70 degree exit).
@@ -89,13 +99,15 @@ public class LauncherSubsystem {
      * at 0.45 x the Hogback tread speed: film one shot at 1179 (the model says 18.75 ft/s) and set
      * SPEED_SCALE = 18.75 / measured ft/s (1.2 if it leaves at 0.375 x, the older estimate).
      * ZONE_MIN/MAX_RANGE_IN: that zone in the SDK's ftcPose.range (hypot(x, y): it leaves out the
-     * camera's z), about 55.0-67.8 in with the camera tilted 50 degrees and the lens 11.25 in up.
+     * camera's z). The robot (18 in) must stay inside the 48 in space around the HIVE, so the front is
+     * 12-30 in from the stand: about 59.5-71 in of range with the camera tilted 50 degrees, the lens
+     * 11.25 in up and 8.5 in back on the right U-bracket (ESTIMATE: read the range at front 12 and 30 in).
      * FEED_MAX_OVER: also don't feed above (target + this), e.g. right after a spin-up overshoot,
      * because a too-fast ball flies long. 30 = the one-speed window; FEED_MARGIN is the low side.
      */
     public static double SPEED_SCALE = 1.0;
-    public static double ZONE_MIN_RANGE_IN = 55;
-    public static double ZONE_MAX_RANGE_IN = 68;
+    public static double ZONE_MIN_RANGE_IN = 59.5;
+    public static double ZONE_MAX_RANGE_IN = 71;
     public static double FEED_MAX_OVER = 30;
     /*
      * SMOOTH MODE (new LauncherSubsystem(hardwareMap, true), used by the tank TeleOp): our own speed
@@ -142,6 +154,8 @@ public class LauncherSubsystem {
     private double distanceSpeed = Double.NaN;
     private double cellRangeIn = Double.NaN;
     private double trim = 0;
+    // Distance-based speed for this launcher only (see setDistanceSpeed()).
+    private boolean distanceSpeedOn = false;
     // Smooth mode: the smoothed speed, the power sent, the encoder check, and time since spin-up began.
     private final boolean smooth;
     private double smoothVelocity = 0;
@@ -329,6 +343,28 @@ public class LauncherSubsystem {
         return justReady;
     }
 
+    /*
+     * Why the roller is or isn't feeding while feedHeld (operator A, or auto launch), for the Driver Hub
+     * and TeleopLog: "feeding", "launcher OFF: press right bumper", or "waiting for speed" with the window.
+     */
+    public String feedState(boolean feedHeld) {
+        if (!enabled) {
+            return "launcher switched off (RobotSwitches)";
+        }
+        if (feeding) {
+            return "feeding";
+        }
+        if (!feedHeld) {
+            return getStateText();
+        }
+        if (!on) {
+            return "A held but launcher OFF: press right bumper";
+        }
+        double target = getShootTarget();
+        return String.format(Locale.US, "A held, waiting for speed: %.0f, feeds between %.0f and %.0f",
+                getVelocity(), target - FEED_MARGIN, target + FEED_MAX_OVER);
+    }
+
     // "off", "spinning up", "ready" or "feeding", for telemetry.
     public String getStateText() {
         if (!on) {
@@ -341,7 +377,8 @@ public class LauncherSubsystem {
     public void addDriverLines(Telemetry telemetry) {
         telemetry.addData("Flywheel", "%s %.0f of %.0f ticks/s (%.0f RPM)",
                 getDirection(), getVelocity(), getShootTarget(), getRpm());
-        telemetry.addData("Shot speed", "%s, trim %+.0f (operator D-pad left/right)",
+        telemetry.addData("Shot speed", "%s %s, trim %+.0f (operator D-pad left/right; FIXED/BY RANGE = RobotSwitches.USE_RANGE_SPEED)",
+                isDistanceSpeedOn() ? "BY RANGE" : "FIXED",
                 Double.isNaN(cellRangeIn) ? "no CELL seen yet" : String.format(Locale.US, "for a CELL %.0f in away, %s",
                         cellRangeIn, isInShootingZone() ? "in zone"
                                 : String.format(Locale.US, "OUTSIDE the %.0f-%.0f in zone", ZONE_MIN_RANGE_IN, ZONE_MAX_RANGE_IN)),
@@ -371,9 +408,23 @@ public class LauncherSubsystem {
         trim += presses * TRIM_STEP;
     }
 
+    // Set the trim to this many ticks/s (the Auto's AUTO_SPEED_ADD), added to the shooting speed.
+    public void setTrim(double ticksPerSecond) {
+        trim = ticksPerSecond;
+    }
+
+    // true = this launcher's speed follows the camera range (NEAR/FAR line), even with USE_DISTANCE_SPEED off.
+    public void setDistanceSpeed(boolean on) {
+        distanceSpeedOn = on;
+    }
+
+    public boolean isDistanceSpeedOn() {
+        return USE_DISTANCE_SPEED || distanceSpeedOn;
+    }
+
     // The speed the launcher spins at when on: distance-based (or TARGET_VELOCITY) plus the trim.
     public double getShootTarget() {
-        double base = USE_DISTANCE_SPEED && !Double.isNaN(distanceSpeed) ? distanceSpeed : TARGET_VELOCITY * SPEED_SCALE;
+        double base = isDistanceSpeedOn() && !Double.isNaN(distanceSpeed) ? distanceSpeed : TARGET_VELOCITY * SPEED_SCALE;
         return base + trim;
     }
 
