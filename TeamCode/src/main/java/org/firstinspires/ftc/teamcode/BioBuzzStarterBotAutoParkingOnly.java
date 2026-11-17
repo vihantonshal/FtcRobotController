@@ -23,7 +23,7 @@ import org.firstinspires.ftc.teamcode.subsystems.RobotSwitches;
 public class BioBuzzStarterBotAutoParkingOnly extends OpMode {
 
     // How far to drive forward, in inches. Can be changed in FTC Dashboard before INIT.
-    public static double FORWARD_IN = 25;
+    public static double FORWARD_IN = 22;
     // Safety: stop after this many seconds even if the robot has not reached the spot (e.g. it is blocked).
     public static double TIMEOUT_SECONDS = 8;
 
