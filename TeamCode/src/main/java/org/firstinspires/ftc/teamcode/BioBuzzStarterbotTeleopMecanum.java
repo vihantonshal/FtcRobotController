@@ -32,6 +32,9 @@ import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.PIDFCoefficients;
 
+import org.firstinspires.ftc.teamcode.subsystems.LauncherSubsystem;
+import org.firstinspires.ftc.teamcode.subsystems.RobotSwitches;
+
 /*
  * This file includes a teleop (driver-controlled) file for the goBILDA® StarterBot with Mecanum
  * Wheels for the 2026-2027 FIRST® Tech Challenge. On top of a mecanum wheel drivetrain, it uses
@@ -61,7 +64,7 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
     private CRServo leftIntakeServo = null;
     private CRServo rightIntakeServo = null;
     private DcMotorEx roller = null;
-
+    private LauncherSubsystem launcherSubsystem = null;
 
     /*
      * These two variables are used to control the velocity of the launcher motor.
@@ -73,9 +76,8 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
      * in the launch() function to only run the windmill servo when the motor is spinning fast
      * enough to make a successful throw.
      */
-    public final int LAUNCHER_TARGET_VELOCITY = 1250; //2678 RPM
-    public final int LAUNCHER_MIN_VELOCITY = 1200; //2571 RPM
-    public final int ROLLER_VELOCITY = 500;
+    public final int LAUNCHER_TARGET_VELOCITY = 1190; //2678 RPM
+    public final int LAUNCHER_MIN_VELOCITY = 1150; //2571 RPM;
 
 
     /*
@@ -113,7 +115,9 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
         roller.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
         leftIntakeServo = hardwareMap.get(CRServo.class, "left_intake_servo");
         rightIntakeServo = hardwareMap.get(CRServo.class, "right_intake_servo");
-
+        launcherSubsystem = new LauncherSubsystem(hardwareMap);
+        launcherSubsystem.setDistanceSpeed(RobotSwitches.USE_RANGE_SPEED);
+        launcherSubsystem.setContinuousFeed(true);
         /*
          * To drive forward, most robots need the motor on one side to be reversed,
          * because the axles point in opposite directions. Pushing the left stick forward
@@ -159,7 +163,8 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
          * Much like our drivetrain motors, we set the right intake servo to reverse so that both
          * servos work to pull elements into the intake.
          */
-        rightIntakeServo.setDirection(DcMotorSimple.Direction.REVERSE);
+        rightIntakeServo.setDirection(DcMotorSimple.Direction.FORWARD);
+        leftIntakeServo.setDirection(DcMotorSimple.Direction.REVERSE);
         roller.setDirection(DcMotorSimple.Direction.REVERSE);
 
 
@@ -199,7 +204,15 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
          * we invert it before passing it to the function.
          */
         mecanumDrive(-gamepad1.left_stick_y, gamepad1.left_stick_x, gamepad1.right_stick_x);
+//if (gamepad2.aWasPressed() && launcher.getVelocity() == LAUNCHER_MIN_VELOCITY) {
+//    roller.setPower(1);
+//}else {
+//    roller.setPower(0);
+//}
 
+        if (gamepad2.aWasPressed() && launcherSubsystem.isOn()) {
+            launcherSubsystem.run(true);
+            }
         /*
          * Set the intake power variable to equal the right trigger, minus the left trigger.
          * Each trigger outputs a signal from 0-1, with 0 as fully released, and 1 fully depressed.
@@ -212,10 +225,23 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
          * allow us to avoid setting the same motors/servos power more than once per loop. That can
          * create erratic behavior.
          */
-        intakePower = gamepad1.right_trigger - gamepad1.left_trigger;
+        intakePower = gamepad2.right_trigger - gamepad2.left_trigger;
 
-        launch();
+        if(!RobotSwitches.USE_LAUNCHER) {
+            launch();
+        }
 
+        if(gamepad2.rightBumperWasPressed()) {
+            launcherSubsystem.toggleOn();
+        }
+        if(gamepad2.dpadRightWasPressed()) {
+            launcherSubsystem.adjustTrim(1);
+        }
+        if(gamepad2.dpadLeftWasPressed()) {
+            launcherSubsystem.adjustTrim(-1);
+        }
+
+        telemetry.addData("Feed (A)", launcherSubsystem.feedState(gamepad2.a));
         /*
          * Here we set our intake motor and servos to their intake power. The order of operations
          * here is important though. The gamepad triggers define the starting point for the intake
@@ -228,11 +254,16 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
         leftIntakeServo.setPower(intakePower);
         rightIntakeServo.setPower(intakePower);
 
+
         /*
          * Show motor powers on the Driver Station via telemetry.
          */
         telemetry.addData("Motors", "left (%.2f), right (%.2f)", leftFrontPower, rightFrontPower);
         telemetry.addData("Triggers", "left (%.2f, right (%.2f)",gamepad1.left_trigger, gamepad1.right_trigger);
+        telemetry.addData("Launcher", "%.2f", launcher.getVelocity());
+        telemetry.addData("Roller", "%.2f", roller.getVelocity());
+        launcherSubsystem.addDriverLines(telemetry);
+        telemetry.update();
     }
 
     /*
@@ -291,10 +322,13 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
          * inside the hopper.
          */
         if (gamepad1.right_bumper && launcher.getVelocity() > LAUNCHER_MIN_VELOCITY) {
-            roller.setVelocity(ROLLER_VELOCITY);
+            //roller.setPower(1);
             intakePower += 0.5;
         } else {
-            roller.setVelocity(0);
+//            roller.setPower(0);
         }
     }
+
+
+
 }
