@@ -76,8 +76,8 @@ public class BioBuzzStarterBotAuto extends OpMode
      * in the launch() function to only run the windmill servo when the motor is spinning fast
      * enough to make a successful throw.
      */
-    public final int LAUNCHER_TARGET_VELOCITY = 1250;
-    public final int LAUNCHER_MIN_VELOCITY = 1200;
+    public final int LAUNCHER_TARGET_VELOCITY = 1150;
+    public final int LAUNCHER_MIN_VELOCITY = 1100;
     MecanumDrive mecanumDrive = null;
 
     /*
@@ -115,6 +115,21 @@ public class BioBuzzStarterBotAuto extends OpMode
     private CRServo leftIntakeServo = null;
     private CRServo rightIntakeServo = null;
     private DcMotor roller = null;
+
+    /*
+     * Here we create an enum not to create a state machine, but to capture which alliance we are on.
+     */
+    private enum Alliance {
+        RED,
+        BLUE,
+        BLUE_DEFENSE,
+        RED_DEFENSE;
+    }
+
+    /*
+     * When we create the instance of our enum we can also assign a default state.
+     */
+    private BioBuzzStarterBotAuto.Alliance alliance = BioBuzzStarterBotAuto.Alliance.RED;
 
     /*
      * TECH TIP: State Machines
@@ -163,8 +178,8 @@ public class BioBuzzStarterBotAuto extends OpMode
          * to 'get' must correspond to the names assigned during the robot configuration
          * step (using the FTC Robot Controller app on the driver's station).
          */
-        leftDrive = hardwareMap.get(DcMotor.class, "left_drive");
-        rightDrive = hardwareMap.get(DcMotor.class, "right_drive");
+//        leftDrive = hardwareMap.get(DcMotor.class, "left_drive");
+//        rightDrive = hardwareMap.get(DcMotor.class, "right_drive");
         intake = hardwareMap.get(DcMotor.class, "intake");
         launcher = hardwareMap.get(DcMotorEx.class, "launcher");
         roller = hardwareMap.get(DcMotor.class, "roller");
@@ -178,22 +193,22 @@ public class BioBuzzStarterBotAuto extends OpMode
          * Note: The settings here assume direct drive on left and right wheels. Gear
          * Reduction or 90 Deg drives may require direction flips
          */
-        leftDrive.setDirection(DcMotor.Direction.FORWARD);
-        rightDrive.setDirection(DcMotor.Direction.REVERSE);
+//        leftDrive.setDirection(DcMotor.Direction.FORWARD);
+//        rightDrive.setDirection(DcMotor.Direction.REVERSE);
 
         /*
          * Here we reset the encoders on our drive motors before we start moving.
          */
-        leftDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-        rightDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+//        leftDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+//        rightDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
 
         /*
          * Setting zeroPowerBehavior to BRAKE enables a "brake mode." This causes the motor to
          * slow down much faster when it is coasting. This creates a much more controllable
          * drivetrain, as the robot stops much quicker.
          */
-        leftDrive.setZeroPowerBehavior(BRAKE);
-        rightDrive.setZeroPowerBehavior(BRAKE);
+//        leftDrive.setZeroPowerBehavior(BRAKE);
+//        rightDrive.setZeroPowerBehavior(BRAKE);
         intake.setZeroPowerBehavior(BRAKE);
 
         /*
@@ -285,10 +300,10 @@ public class BioBuzzStarterBotAuto extends OpMode
          *
          */
         telemetry.addData("AutoState", autonomousState);
-        telemetry.addData("Motor Current Positions", "left (%d), right (%d)",
-                leftDrive.getCurrentPosition(), rightDrive.getCurrentPosition());
-        telemetry.addData("Motor Target Positions", "left (%d), right (%d)",
-                leftDrive.getTargetPosition(), rightDrive.getTargetPosition());
+//        telemetry.addData("Motor Current Positions", "left (%d), right (%d)",
+//                leftDrive.getCurrentPosition(), rightDrive.getCurrentPosition());
+//        telemetry.addData("Motor Target Positions", "left (%d), right (%d)",
+//                leftDrive.getTargetPosition(), rightDrive.getTargetPosition());
         telemetry.update();
     }
 
@@ -344,13 +359,14 @@ public class BioBuzzStarterBotAuto extends OpMode
 //        leftDrive.setPower(speed);
 //        rightDrive.setPower(speed);
 //TODO:: put mecanum
+
         String direction = "LEFT";
-        distance = 20;
+        distance = 65;
 
         mecanumDrive.driveDistance(direction, distance, speed);
         telemetry.addData("Status", "Driving Left");
-        direction = "";
-        distance = 48;
+        direction = "BACK";
+        distance = 130;
         mecanumDrive.driveDistance(direction, distance, speed);
         telemetry.addData("Status", "Driving Forward");
 
@@ -362,9 +378,9 @@ public class BioBuzzStarterBotAuto extends OpMode
          * the driveTimer. Only after we reach the target can the timer count higher than our
          * holdSeconds variable.
          */
-        if(Math.abs(targetPosition - leftDrive.getCurrentPosition()) > (TOLERANCE_MM * TICKS_PER_MM)){
-            driveTimer.reset();
-        }
+//        if(Math.abs(targetPosition - leftDrive.getCurrentPosition()) > (TOLERANCE_MM * TICKS_PER_MM)){
+//            driveTimer.reset();
+//        }
         telemetry.update();
         return (driveTimer.seconds() > holdSeconds);
     }

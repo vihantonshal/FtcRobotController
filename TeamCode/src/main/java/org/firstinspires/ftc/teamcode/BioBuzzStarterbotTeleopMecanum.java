@@ -284,31 +284,98 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
 
     }
 
-    void mecanumDrive(double forward, double strafe, double rotate) {
-        leftFrontPower = forward + strafe + rotate;
-        rightFrontPower = forward - strafe - rotate;
-        leftBackPower = forward - strafe + rotate;
-        rightBackPower = forward + strafe - rotate;
 
-        double max = Math.max(Math.abs(leftFrontPower), Math.abs(rightFrontPower));
-        max = Math.max(max, Math.abs(leftBackPower));
-        max = Math.max(max, Math.abs(rightBackPower));
+    // AI Helped
+    public void  mecanumDrive(double forward, double strafe, double rotate) {
 
-        if (max > 1.0) {
-            leftFrontPower /= max;
-            rightFrontPower /= max;
-            leftBackPower /= max;
-            rightBackPower /= max;
-        }
+        // --- Configuration Constants ---
+        // Max power robot can reach (e.g., 0.8 for 80% of full speed)
+        final double MAX_SPEED_FACTOR = 0.8;
+        // Power Smoothing Exponent: 1.0 is linear, 3.0 is cubic (more sensitive to small inputs)
+        final double POWER_SMOOTHING_EXPONENT = 3.0;
 
-        /*
-         * Send calculated power to wheels
+        // --- 1. Apply Smoothing (Non-Linear Power Curve) ---
+        // Uses the formula: sign(x) * |x|^P, which gives finer control at low speeds.
+        double f = Math.copySign(Math.pow(Math.abs(forward), POWER_SMOOTHING_EXPONENT), forward);
+        double s = Math.copySign(Math.pow(Math.abs(strafe), POWER_SMOOTHING_EXPONENT), strafe);
+        double r = Math.copySign(Math.pow(Math.abs(rotate), POWER_SMOOTHING_EXPONENT), rotate);
+
+        // --- 2. Calculate Raw Motor Powers (Mecanum Kinematics) ---
+        /* The signs for 's' are crucial. The standard set is (+s, -s, -s, +s).
+         * If strafing is reversed, change all 's' signs.
+         * e.g., for LeftFront use (f - s + r) instead of (f + s + r)
          */
+
+        double leftFrontRawPower = f + s + r;
+        double rightFrontRawPower = f - s - r;
+        double leftBackRawPower = f - s + r;
+        double rightBackRawPower = f + s - r;
+
+
+//        // Option B: Use this if strafing is reversed with the standard signs.
+//        double leftFrontRawPower = f - s + r; // <-- s sign inverted
+//        double rightFrontRawPower = f + s - r; // <-- s sign inverted
+//        double leftBackRawPower = f + s + r; // <-- s sign inverted
+//        double rightBackRawPower = f - s - r; // <-- s sign inverted
+
+        // --- 3. Normalization (Scaling) ---
+        /* Denominator is the largest absolute power required across all motors, or 1.
+         * This ensures no power value exceeds 1.0 *before* the MAX_SPEED_FACTOR is applied.
+         */
+        double maxMagnitude = Math.max(
+                Math.abs(leftFrontRawPower),
+                Math.max(
+                        Math.abs(rightFrontRawPower),
+                        Math.max(Math.abs(leftBackRawPower), Math.abs(rightBackRawPower))
+                )
+        );
+        // Use Math.max(maxMagnitude, 1) to prevent division by a number less than 1,
+        // which would unnecessarily scale up small powers (though power smoothing makes this less likely)
+        double denominator = Math.max(maxMagnitude, 1.0);
+
+        // --- 4. Final Power Calculation and Limiting ---
+
+        // Calculate final power and scale by the MAX_SPEED_FACTOR
+        leftFrontPower = (leftFrontRawPower / denominator) * MAX_SPEED_FACTOR;
+        rightFrontPower = (rightFrontRawPower / denominator) * MAX_SPEED_FACTOR;
+        leftBackPower = (leftBackRawPower / denominator) * MAX_SPEED_FACTOR;
+        rightBackPower = (rightBackRawPower / denominator) * MAX_SPEED_FACTOR;
+
+        // --- 5. Set Motor Powers ---
         leftFrontDrive.setPower(leftFrontPower);
         rightFrontDrive.setPower(rightFrontPower);
         leftBackDrive.setPower(leftBackPower);
         rightBackDrive.setPower(rightBackPower);
+
+
+
     }
+
+//    void mecanumDrive(double forward, double strafe, double rotate) {
+//        leftFrontPower = forward + strafe + rotate;
+//        rightFrontPower = forward - strafe - rotate;
+//        leftBackPower = forward - strafe + rotate;
+//        rightBackPower = forward + strafe - rotate;
+//
+//        double max = Math.max(Math.abs(leftFrontPower), Math.abs(rightFrontPower));
+//        max = Math.max(max, Math.abs(leftBackPower));
+//        max = Math.max(max, Math.abs(rightBackPower));
+//
+//        if (max > 1.0) {
+//            leftFrontPower /= max;
+//            rightFrontPower /= max;
+//            leftBackPower /= max;
+//            rightBackPower /= max;
+//        }
+//
+//        /*
+//         * Send calculated power to wheels
+//         */
+//        leftFrontDrive.setPower(leftFrontPower);
+//        rightFrontDrive.setPower(rightFrontPower);
+//        leftBackDrive.setPower(leftBackPower);
+//        rightBackDrive.setPower(rightBackPower);
+//    }
 
     void launch() {
         /*

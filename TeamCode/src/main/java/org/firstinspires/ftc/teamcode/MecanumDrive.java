@@ -232,6 +232,16 @@ double power = 0.6;
             blPower = -power;
             brPower = power;
 
+        } else if (direction.equalsIgnoreCase("BACK")) {
+        flPower = -power;
+        frPower = -power;
+        blPower = -power;
+        brPower = -power;
+    } else if (direction.equalsIgnoreCase("FORWARD")) {
+            flPower = power;
+            frPower = power;
+            blPower = power;
+            brPower = power;
         }
 if(direction == ""){
     // Set target position
