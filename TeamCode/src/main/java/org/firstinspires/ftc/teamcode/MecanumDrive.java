@@ -2,18 +2,40 @@ package org.firstinspires.ftc.teamcode;
 
 import com.qualcomm.hardware.bosch.BHI260IMU;
 import com.qualcomm.hardware.digitalchickenlabs.OctoQuad;
+import static com.qualcomm.robotcore.hardware.DcMotor.ZeroPowerBehavior.BRAKE;
 import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
 import com.qualcomm.robotcore.hardware.DcMotor;
+import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.DistanceSensor;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.hardware.IMU;
 import com.qualcomm.robotcore.util.ElapsedTime;
+import com.qualcomm.robotcore.util.Range;
 
 import org.firstinspires.ftc.robotcore.external.Telemetry;
 import org.firstinspires.ftc.robotcore.external.navigation.*;
 
 public class MecanumDrive {
+    /*
+     * How the Control Hub is mounted, for the built-in IMU (field-centric driving, and the Auto's
+     * SEARCH and PARK). Look at the hub: which way does the REV logo face, and which way do the USB
+     * ports point? The two must be at right angles.
+     *   Flat on the chassis, logo up:            HUB_LOGO = UP,    HUB_USB = the way the ports point
+     *   Upright on the robot's LEFT side, logo out:  HUB_LOGO = LEFT,  HUB_USB = UP, DOWN, FORWARD or BACKWARD
+     *   Upright on the robot's RIGHT side, logo out: HUB_LOGO = RIGHT, HUB_USB = UP, DOWN, FORWARD or BACKWARD
+     * Check: in the Auto's INIT, turn the robot left by hand; "Heading" must go up. If it goes down
+     * or barely moves, these two are wrong. roadrunner/MecanumDrive PARAMS needs the same values.
+     * Our robot: upright on its side, logo toward the robot's LEFT, USB ports pointing DOWN.
+     */
+    public static RevHubOrientationOnRobot.LogoFacingDirection HUB_LOGO =
+            RevHubOrientationOnRobot.LogoFacingDirection.LEFT;
+    public static RevHubOrientationOnRobot.UsbFacingDirection HUB_USB =
+            RevHubOrientationOnRobot.UsbFacingDirection.DOWN;
+
+    private double poseX = 0, poseY = 0, wheelHeadingRad = 0;
+
+    private final int[] lastTicks = new int[4];
 
     private double FL_COMPENSATION=0.0;
     private double      FR_COMPENSATION=0.0;
@@ -31,6 +53,7 @@ public class MecanumDrive {
 //    DistanceSensor leftDistance;
 //    DistanceSensor rightDistance;
 //    DistanceSensor backDistance;
+
     // This declares the IMU needed to get the current direction the robot is facing
     public IMU imu;
 
@@ -38,6 +61,7 @@ public class MecanumDrive {
     String frDrive = "front_right_motor";
     String blDrive = "back_left_motor";
     String brDrive = "back_right_motor";
+    private  DcMotor[] motors;
 
     public MecanumDrive(HardwareMap hardwareMap, Telemetry telemetry){
         this.hardwareMap = hardwareMap;
@@ -48,6 +72,9 @@ public class MecanumDrive {
         frontRightDrive = hardwareMap.get(DcMotor.class, frDrive);
         backLeftDrive = hardwareMap.get(DcMotor.class, blDrive);
         backRightDrive = hardwareMap.get(DcMotor.class, brDrive);
+
+        motors = new DcMotor[]{frontLeftDrive, frontRightDrive, backLeftDrive, backRightDrive};
+
        /* octoQuad = hardwareMap.get(OctoQuad.class, "octoquad");
 
         /* we don't have a distance sensor so we will take out the code that uses the distance sensor
@@ -79,17 +106,110 @@ public class MecanumDrive {
         backLeftDrive.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
         backRightDrive.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
 
+        for (DcMotor motor : motors) {
+            motor.setZeroPowerBehavior(BRAKE);
+        }
+
+        resetEncoders();
+        /*
+         * The IMU tells us which way the robot faces. tryGet() returns null instead of crashing
+         * when "imu" is missing from the configuration; then field-centric driving falls back to
+         * normal (robot-centric) driving.
+         */
         imu = hardwareMap.get(IMU.class, "imu");
-        // This needs to be changed to match the orientation on your robot
-        RevHubOrientationOnRobot.LogoFacingDirection logoDirection =
-                RevHubOrientationOnRobot.LogoFacingDirection.UP;
-        RevHubOrientationOnRobot.UsbFacingDirection usbDirection =
-                RevHubOrientationOnRobot.UsbFacingDirection.FORWARD;
 
-        RevHubOrientationOnRobot orientationOnRobot = new
-                RevHubOrientationOnRobot(logoDirection, usbDirection);
+        //imu.initialize(new IMU.Parameters(orientationOnRobot));
+        if (imu != null) {
+            imu.initialize(new IMU.Parameters(new RevHubOrientationOnRobot(HUB_LOGO, HUB_USB)));
+            imu.resetYaw();
+        }
+    }
+    double leftFrontPower;
+    double rightFrontPower;
+    double leftBackPower;
+    double rightBackPower;
 
-        imu.initialize(new IMU.Parameters(orientationOnRobot));
+    // AI Helped
+    public void  mecanumDrive(double forward, double strafe, double rotate) {
+
+        // --- Configuration Constants ---
+        // Max power robot can reach (e.g., 0.8 for 80% of full speed)
+        final double MAX_SPEED_FACTOR = 0.8;
+        // Power Smoothing Exponent: 1.0 is linear, 3.0 is cubic (more sensitive to small inputs)
+        final double POWER_SMOOTHING_EXPONENT = 3.0;
+
+        // --- 1. Apply Smoothing (Non-Linear Power Curve) ---
+        // Uses the formula: sign(x) * |x|^P, which gives finer control at low speeds.
+        double f = Math.copySign(Math.pow(Math.abs(forward), POWER_SMOOTHING_EXPONENT), forward);
+        double s = Math.copySign(Math.pow(Math.abs(strafe), POWER_SMOOTHING_EXPONENT), strafe);
+        double r = Math.copySign(Math.pow(Math.abs(rotate), POWER_SMOOTHING_EXPONENT), rotate);
+
+        // --- 2. Calculate Raw Motor Powers (Mecanum Kinematics) ---
+        /* The signs for 's' are crucial. The standard set is (+s, -s, -s, +s).
+         * If strafing is reversed, change all 's' signs.
+         * e.g., for LeftFront use (f - s + r) instead of (f + s + r)
+         */
+
+        double leftFrontRawPower = f + s + r;
+        double rightFrontRawPower = f - s - r;
+        double leftBackRawPower = f - s + r;
+        double rightBackRawPower = f + s - r;
+
+
+//        // Option B: Use this if strafing is reversed with the standard signs.
+//        double leftFrontRawPower = f - s + r; // <-- s sign inverted
+//        double rightFrontRawPower = f + s - r; // <-- s sign inverted
+//        double leftBackRawPower = f + s + r; // <-- s sign inverted
+//        double rightBackRawPower = f - s - r; // <-- s sign inverted
+
+        // --- 3. Normalization (Scaling) ---
+        /* Denominator is the largest absolute power required across all motors, or 1.
+         * This ensures no power value exceeds 1.0 *before* the MAX_SPEED_FACTOR is applied.
+         */
+        double maxMagnitude = Math.max(
+                Math.abs(leftFrontRawPower),
+                Math.max(
+                        Math.abs(rightFrontRawPower),
+                        Math.max(Math.abs(leftBackRawPower), Math.abs(rightBackRawPower))
+                )
+        );
+        // Use Math.max(maxMagnitude, 1) to prevent division by a number less than 1,
+        // which would unnecessarily scale up small powers (though power smoothing makes this less likely)
+        double denominator = Math.max(maxMagnitude, 1.0);
+
+        // --- 4. Final Power Calculation and Limiting ---
+
+        // Calculate final power and scale by the MAX_SPEED_FACTOR
+        leftFrontPower = (leftFrontRawPower / denominator) * MAX_SPEED_FACTOR;
+        rightFrontPower = (rightFrontRawPower / denominator) * MAX_SPEED_FACTOR;
+        leftBackPower = (leftBackRawPower / denominator) * MAX_SPEED_FACTOR;
+        rightBackPower = (rightBackRawPower / denominator) * MAX_SPEED_FACTOR;
+
+        // --- 5. Set Motor Powers ---
+        frontLeftDrive.setPower(leftFrontPower);
+        frontRightDrive.setPower(rightFrontPower);
+        backLeftDrive.setPower(leftBackPower);
+        backRightDrive.setPower(rightBackPower);
+
+
+
+    }
+
+    // Set every wheel's position count back to 0. Call between Auto moves.
+    public void resetEncoders() {
+        for (DcMotor motor : motors) {
+            motor.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+            motor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        }
+        // The counts are 0 again, so odometry must not see this as a big move.
+        java.util.Arrays.fill(lastTicks, 0);
+    }
+
+    public double getPoseHeadingDeg() {
+        if (imu != null) {
+            return imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.DEGREES);
+        }
+        return Math.toDegrees(wheelHeadingRad);
     }
 
     // Thanks to FTC16072 for sharing this code!!
@@ -122,7 +242,7 @@ public class MecanumDrive {
         double backRightPower = f + s - r;
 
         double maxPower = 1.0;
-        double maxSpeed = 1.0;  // make this slower for outreaches
+        double maxSpeed = MAX_SPEED_FACTOR; //1.0;  // make this slower for outreaches
 
         // This is needed to make sure we don't pass > 1.0 to any wheel
         // It allows us to keep all of the motors in proportion to what they should
@@ -139,15 +259,19 @@ public class MecanumDrive {
         frontRightDrive.setPower(maxSpeed * (frontRightPower / maxPower));
         backLeftDrive.setPower(maxSpeed * (backLeftPower / maxPower));
         backRightDrive.setPower(maxSpeed * (backRightPower / maxPower));
+
         //telemetry.addData("Color","R %d  G %d  B %d", colorSensor.red(), colorSensor.green(), colorSensor.blue());
 //            Orientation orientation = imu.getAngularOrientation(AxesReference.INTRINSIC, AxesOrder.ZYX, AngleUnit.RADIANS);
+
         Orientation orientation = imu.getRobotOrientation(AxesReference.INTRINSIC, AxesOrder.ZYX, AngleUnit.RADIANS);
         telemetry.addData("Heading", " %.1f", orientation.firstAngle * 180.0 / Math.PI);
         telemetry.addData("Angular Velocity", "%.1f", imu.getRobotAngularVelocity(AngleUnit.DEGREES).zRotationRate);
+
 //        telemetry.addData("Front Distance", " %.1f", frontDistance.getDistance(DistanceUnit.CM));
 //        telemetry.addData("Left Distance", " %.1f", leftDistance.getDistance(DistanceUnit.CM));
 //        telemetry.addData("Right Distance", " %.1f", rightDistance.getDistance(DistanceUnit.CM));
 //        telemetry.addData("Back Distance", " %.1f", backDistance.getDistance(DistanceUnit.CM));
+
         telemetry.addData("Encoders"," %d %d %d %d", backLeftDrive.getCurrentPosition(), frontLeftDrive.getCurrentPosition(),
                 frontRightDrive.getCurrentPosition(), backRightDrive.getCurrentPosition());
 //        telemetry.addData("Octoquad", "%d %d %d %d", octoQuad.readSinglePosition(0),
@@ -155,6 +279,7 @@ public class MecanumDrive {
 //                octoQuad.readSinglePosition(3));
         telemetry.update();
     }
+
     // This routine drives the robot field relative
     public void driveFieldRelative(double forward, double right, double rotate) {
         // First, convert direction being asked to drive to polar coordinates
@@ -176,9 +301,48 @@ public class MecanumDrive {
     /***************************************Autonomous code*****************************/
     private static final double COUNTS_PER_MOTOR_REV = 537.7;  // eg: GoBILDA 312 RPM
     private static final double DRIVE_GEAR_REDUCTION = 1.0;
-    private static final double WHEEL_DIAMETER_INCHES = 4.0;
+    //private static final double WHEEL_DIAMETER_INCHES = 4.094;
+
+    // ---------- 1. Change this existing line (it was 4.0) ----------
+    private static final double WHEEL_DIAMETER_INCHES = 104.0 / 25.4;   // 104 mm wheel
+
+
     private static final double COUNTS_PER_INCH = (COUNTS_PER_MOTOR_REV * DRIVE_GEAR_REDUCTION) /
             (WHEEL_DIAMETER_INCHES * 3.1415);
+
+
+    // ---------- 2. Add inside MecanumDrive ----------
+    static final double STRAFE_CORRECTION = 1.1;    // sideways slips: tune with a tape measure
+    static final double START_POWER = 0.2, RAMP_UP_PER_INCH = 0.1;
+    static final double MIN_POWER = 0.15, SLOW_DOWN_PER_INCH = 0.08;
+    static final double HEADING_GAIN = 0.02, MAX_CORRECTION = 0.25;    // yaw hold
+    static final double CROSS_GAIN = 0.05, MAX_CROSS = 0.20;           // encoder drift fix. 0 if you use the trims
+    static final double LEFT_FORWARD_TRIM = 0.0, RIGHT_FORWARD_TRIM = 0.0;  // forward ended -> negative
+    static final double LEFT_CRAB_DEG = 0.0, RIGHT_CRAB_DEG = 0.0;     // use trims OR crab, not both
+
+    private double holdHeading = 0;                 // "straight", in degrees
+    // A LinearOpMode can set this to this::opModeIsActive. The default (always true) is safe: the timeout still stops moves.
+    public java.util.function.BooleanSupplier isActive = () -> true;
+
+    private double getYaw() {
+        return imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.DEGREES);
+    }
+    private static double clip(double v, double lo, double hi) { return Math.max(lo, Math.min(hi, v)); }
+    public void setHoldHeading(double deg) { holdHeading = deg; }
+
+    // Call from init_loop() (or a wait loop). Kids square the robot to the wall and press A.
+    public void squareUpStep(boolean zeroButton) {
+        if (zeroButton) imu.resetYaw();             // robot is square NOW -> 0 degrees
+        double yaw = getYaw();
+        telemetry.addData("Yaw", "%.1f deg", yaw);
+        if (Math.abs(yaw) < 1.0)  telemetry.addLine("SQUARE - read");
+        else if (yaw > 0)         telemetry.addLine("Turn the robot CLOCKWISE (right) a little");
+        else                      telemetry.addLine("Turn the robolittle");
+        telemetry.addLine("Push robot square to the wall, then press A");
+        holdHeading = 0;
+    }
+
+
     private Pose2d robotPose = new Pose2d(0.0, 0.0, 0.0);
 
     // Inner class for 2D Pose
@@ -212,107 +376,208 @@ public class MecanumDrive {
         }
     }
 
+//    public void driveDistance(String direction, double inches, double speed) {
+//        int targetCounts = (int)(inches * COUNTS_PER_INCH);
+//        double power = 0.6;
+//        // Store starting pose
+//        Pose2d startPose = robotPose.copy();
+//
+//        double flPower = 0, frPower=0, blPower=0, brPower=0;
+//
+//        if (direction.equalsIgnoreCase("LEFT")) {
+//            flPower = -power;
+//            frPower = power;
+//            blPower = power;
+//            brPower = -power;
+//
+//        } else if (direction.equalsIgnoreCase("RIGHT")) {
+//            flPower = power;
+//            frPower = -power;
+//            blPower = -power;
+//            brPower = power;
+//
+//        } else if (direction.equalsIgnoreCase("BACK")) {
+//            flPower = -power;
+//            frPower = -power;
+//            blPower = -power;
+//            brPower = -power;
+//    } else if (direction.equalsIgnoreCase("FORWARD")) {
+//            flPower = power;
+//            frPower = power;
+//            blPower = power;
+//            brPower = power;
+//        }
+//        if(direction == ""){
+//            // Set target position
+//            frontLeftDrive.setTargetPosition(frontLeftDrive.getCurrentPosition() + targetCounts );
+//            frontRightDrive.setTargetPosition(frontRightDrive.getCurrentPosition() + targetCounts );
+//            backLeftDrive.setTargetPosition(backLeftDrive.getCurrentPosition() + targetCounts );
+//            backRightDrive.setTargetPosition(backRightDrive.getCurrentPosition() + targetCounts );
+//        }
+//        else {
+//            // Set target position
+//            frontLeftDrive.setTargetPosition(frontLeftDrive.getCurrentPosition() + (int) (targetCounts * flPower));
+//            frontRightDrive.setTargetPosition(frontRightDrive.getCurrentPosition() + (int) (targetCounts * frPower));
+//            backLeftDrive.setTargetPosition(backLeftDrive.getCurrentPosition() + (int) (targetCounts * blPower));
+//            backRightDrive.setTargetPosition(backRightDrive.getCurrentPosition() + (int) (targetCounts * brPower));
+//
+//        }
+//        // Switch to RUN_TO_POSITION mode
+//        setMode(DcMotor.RunMode.RUN_TO_POSITION);
+//
+//        // Start moving
+//        setPower(speed);
+//
+//        // Wait until target is reached
+//        //opModeIsActive() &&
+//        while (
+//                (frontLeftDrive.isBusy() || frontRightDrive.isBusy() ||
+//                        backLeftDrive.isBusy() || backRightDrive.isBusy())) {
+//
+//            // Calculate current distance traveled
+//            double avgPosition = (frontLeftDrive.getCurrentPosition() +
+//                    frontRightDrive.getCurrentPosition() +
+//                    backLeftDrive.getCurrentPosition() +
+//                    backRightDrive.getCurrentPosition()) / 4.0;
+//            double distanceTraveled = avgPosition / COUNTS_PER_INCH;
+//
+//            // Update current pose based on heading and distance
+//            Pose2d currentPose = new Pose2d(
+//                    startPose.x + distanceTraveled * Math.sin(robotPose.heading),
+//                    startPose.y + distanceTraveled * Math.cos(robotPose.heading),
+//                    robotPose.heading
+//            );
+//
+//            telemetry.addData("HeadingDeg", "Driving:",getPoseHeadingDeg());
+//
+//            telemetry.addData("Status", "Driving Forward", getPoseHeadingDeg());
+//            telemetry.addData("Target Distance", "%.2f inches", inches);
+//            telemetry.addData("Distance Traveled", "%.2f inches", distanceTraveled);
+//            telemetry.addLine();
+//            telemetry.addData("Current Pose", currentPose.toString());
+//            telemetry.addData("X Position", "%.2f inches", currentPose.x);
+//            telemetry.addData("Y Position", "%.2f inches", currentPose.y);
+//            telemetry.addData("Heading", "%.1f°", currentPose.getHeadingDegrees());
+//            telemetry.addLine();
+//            telemetry.addData("Left Front", "%d / %d", frontLeftDrive.getCurrentPosition(), frontLeftDrive.getTargetPosition());
+//            telemetry.addData("Right Front", "%d / %d", frontRightDrive.getCurrentPosition(), frontRightDrive.getTargetPosition());
+//            telemetry.update();
+//        }
+//
+//        // Update final robot pose
+//        robotPose.x += inches * Math.sin(robotPose.heading);
+//        robotPose.y += inches * Math.cos(robotPose.heading);
+//
+//        // Stop motors
+//        setPower(0);
+//
+//        // Switch back to RUN_USING_ENCODER
+//        setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+//    }
+
+    // ---------- 3. driveDistance with this ----------
     public void driveDistance(String direction, double inches, double speed) {
-        int targetCounts = (int)(inches * COUNTS_PER_INCH);
-double power = 0.6;
-        // Store starting pose
-        Pose2d startPose = robotPose.copy();
+        double fwdDir = 0, sideDir = 0;                 // same meaning as TeleOp: strafe + = RIGHT
+        if      (direction.equalsIgnoreCase("FORWARD")) fwdDir  =  1;
+        else if (direction.equalsIgnoreCase("BACK"))    fwdDir  = -1;
+        else if (direction.equalsIgnoreCase("RIGHT"))   sideDir =  1;
+        else if (direction.equalsIgnoreCase("LEFT"))    sideDir = -1;
+        else { telemetry.addData("ERROR", "Unknown direction: " + direction); telemetry.update(); return; }
 
-        double flPower = 0, frPower=0, blPower=0, brPower=0;
+        boolean strafing = sideDir != 0;
+        double ticksPerInch = COUNTS_PER_INCH * (strafing ? STRAFE_CORRECTION : 1.0);
+        double targetTicks  = inches * ticksPerInch;
 
-        if (direction.equalsIgnoreCase("LEFT")) {
-            flPower = -power;
-            frPower = power;
-            blPower = power;
-            brPower = -power;
+        double trim = 0, crab = 0;
+        if (direction.equalsIgnoreCase("LEFT"))       { trim = LEFT_FORWARD_TRIM;  crab = LEFT_CRAB_DEG; }
+        else if (direction.equalsIgnoreCase("RIGHT")) { trim = RIGHT_FORWARD_TRIM; crab = RIGHT_CRAB_DEG; }
+        double aim = holdHeading + crab;
+        if (crab != 0) turnToHeading(aim);
 
-        } else if (direction.equalsIgnoreCase("RIGHT")) {
-            flPower = power;
-            frPower = -power;
-            blPower = -power;
-            brPower = power;
+        int flStart = frontLeftDrive.getCurrentPosition();
+        int frStart = frontRightDrive.getCurrentPosition();
+        int blStart = backLeftDrive.getCurrentPosition();
+        int brStart = backRightDrive.getCurrentPosition();
 
-        } else if (direction.equalsIgnoreCase("BACK")) {
-        flPower = -power;
-        frPower = -power;
-        blPower = -power;
-        brPower = -power;
-    } else if (direction.equalsIgnoreCase("FORWARD")) {
-            flPower = power;
-            frPower = power;
-            blPower = power;
-            brPower = power;
-        }
-if(direction == ""){
-    // Set target position
-    frontLeftDrive.setTargetPosition(frontLeftDrive.getCurrentPosition() + targetCounts );
-    frontRightDrive.setTargetPosition(frontRightDrive.getCurrentPosition() + targetCounts );
-    backLeftDrive.setTargetPosition(backLeftDrive.getCurrentPosition() + targetCounts );
-    backRightDrive.setTargetPosition(backRightDrive.getCurrentPosition() + targetCounts );
-}
-else {
-    // Set target position
-    frontLeftDrive.setTargetPosition(frontLeftDrive.getCurrentPosition() + (int) (targetCounts * flPower));
-    frontRightDrive.setTargetPosition(frontRightDrive.getCurrentPosition() + (int) (targetCounts * frPower));
-    backLeftDrive.setTargetPosition(backLeftDrive.getCurrentPosition() + (int) (targetCounts * blPower));
-    backRightDrive.setTargetPosition(backRightDrive.getCurrentPosition() + (int) (targetCounts * brPower));
+        setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        ElapsedTime timer = new ElapsedTime();
+        double timeout = 2 + inches * 0.25;
 
-}
-        // Switch to RUN_TO_POSITION mode
-        setMode(DcMotor.RunMode.RUN_TO_POSITION);
+        while (isActive.getAsBoolean() && timer.seconds() < timeout) {
+            int dFL = frontLeftDrive.getCurrentPosition()  - flStart;
+            int dFR = frontRightDrive.getCurrentPosition() - frStart;
+            int dBL = backLeftDrive.getCurrentPosition()   - blStart;
+            int dBR = backRightDrive.getCurrentPosition()  - brStart;
 
-        // Start moving
-        setPower(speed);
+            double fwdTicks  = (dFL + dFR + dBL + dBR) / 4.0;     // + = moved ahead
+            double sideTicks = (dFL - dFR - dBL + dBR) / 4.0;     // + = moved right
+            double traveledTicks = fwdDir * fwdTicks + sideDir * sideTicks;
+            if (traveledTicks >= targetTicks) break;
 
-        // Wait until target is reached
-        //opModeIsActive() &&
-        while (
-                (frontLeftDrive.isBusy() || frontRightDrive.isBusy() ||
-                        backLeftDrive.isBusy() || backRightDrive.isBusy())) {
+            double traveledIn  = traveledTicks / ticksPerInch;
+            double remainingIn = inches - traveledIn;
+            double p = Math.min(Math.abs(speed), START_POWER + traveledIn * RAMP_UP_PER_INCH);
+            p = Math.min(p, MIN_POWER + remainingIn * SLOW_DOWN_PER_INCH);
 
-            // Calculate current distance traveled
-            double avgPosition = (frontLeftDrive.getCurrentPosition() +
-                    frontRightDrive.getCurrentPosition() +
-                    backLeftDrive.getCurrentPosition() +
-                    backRightDrive.getCurrentPosition()) / 4.0;
-            double distanceTraveled = avgPosition / COUNTS_PER_INCH;
+            // The "driver's right stick": steer to keep the nose on `aim`
+            double error = AngleUnit.normalizeDegrees(aim - getYaw());
+            double turn  = clip(-HEADING_GAIN * error, -MAX_CORRECTION, MAX_CORRECTION);   // + = clockwise
 
-            // Update current pose based on heading and distance
-            Pose2d currentPose = new Pose2d(
-                    startPose.x + distanceTraveled * Math.sin(robotPose.heading),
-                    startPose.y + distanceTraveled * Math.cos(robotPose.heading),
-                    robotPose.heading
-            );
+            // The "driver's eyes": push back if the robot slides off the line
+            double driftIn = strafing ? fwdTicks / COUNTS_PER_INCH
+                    : sideTicks / (COUNTS_PER_INCH * STRAFE_CORRECTION);
+            double c = clip(-CROSS_GAIN * driftIn, -MAX_CROSS, MAX_CROSS);
 
-            telemetry.addData("Status", "Driving Forward");
-            telemetry.addData("Target Distance", "%.2f inches", inches);
-            telemetry.addData("Distance Traveled", "%.2f inches", distanceTraveled);
-            telemetry.addLine();
-            telemetry.addData("Current Pose", currentPose.toString());
-            telemetry.addData("X Position", "%.2f inches", currentPose.x);
-            telemetry.addData("Y Position", "%.2f inches", currentPose.y);
-            telemetry.addData("Heading", "%.1f°", currentPose.getHeadingDegrees());
-            telemetry.addLine();
-            telemetry.addData("Left Front", "%d / %d", frontLeftDrive.getCurrentPosition(), frontLeftDrive.getTargetPosition());
-            telemetry.addData("Right Front", "%d / %d", frontRightDrive.getCurrentPosition(), frontRightDrive.getTargetPosition());
+            double f = fwdDir  * p + (strafing ? c + trim * p : 0);
+            double s = sideDir * p + (strafing ? 0 : c);
+            setMecanum(f, s, turn);
+
+            telemetry.addData("Move", "%s %.0f in", direction, inches);
+            telemetry.addData("Traveled", "%.1f in", traveledIn);
+            telemetry.addData("Heading error", "%.1f deg (steering %.2f)", error, turn);
+            telemetry.addData("Drift", "%.1f in", driftIn);
             telemetry.update();
         }
 
-        // Update final robot pose
-        robotPose.x += inches * Math.sin(robotPose.heading);
-        robotPose.y += inches * Math.cos(robotPose.heading);
-
-        // Stop motors
         setPower(0);
+        if (crab != 0) turnToHeading(holdHeading);
+    }
 
-        // Switch back to RUN_USING_ENCODER
-        setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+    // NEW: paste it here
+    private void setMecanum(double f, double s, double r) {
+        double fl = f + s + r;
+        double fr = f - s - r;
+        double bl = f - s + r;
+        double br = f + s - r;
+        double max = Math.max(1.0, Math.max(Math.max(Math.abs(fl), Math.abs(fr)),
+                Math.max(Math.abs(bl), Math.abs(br))));
+        frontLeftDrive.setPower(fl / max);
+        frontRightDrive.setPower(fr / max);
+        backLeftDrive.setPower(bl / max);
+        backRightDrive.setPower(br / max);
+    }
+
+    public void turnToHeading(){
+        turnToHeading(holdHeading);
+    }
+    // Turn on the spot until the nose points at targetDeg (gives up after 1.5 s)
+    private void turnToHeading(double targetDeg) {
+        ElapsedTime t = new ElapsedTime();
+        while (t.seconds() < 1.5) {
+            double err = AngleUnit.normalizeDegrees(targetDeg - getPoseHeadingDeg());
+            if (Math.abs(err) < 0.7) break;
+            double turn = Range.clip(-0.03 * err, -0.3, 0.3);          // + = clockwise
+            if (Math.abs(turn) < 0.1) turn = Math.copySign(0.1, turn);  // enough to actually move
+            frontLeftDrive.setPower(turn);   backLeftDrive.setPower(turn);
+            frontRightDrive.setPower(-turn); backRightDrive.setPower(-turn);
+        }
+        setPower(0);
     }
 
     public void turnDegrees(double degrees, double speed) {
         // Calculate distance each wheel needs to travel
         // Adjust ROBOT_WIDTH based on your robot's width in inches
-        double ROBOT_WIDTH = 16.0;  // Distance between left and right wheels
+        double ROBOT_WIDTH = 17.0;  // Distance between left and right wheels
         double arcLength = Math.PI * ROBOT_WIDTH * (degrees / 360.0);
         int targetCounts = (int)(arcLength * COUNTS_PER_INCH);
 
@@ -506,4 +771,9 @@ else {
         backRightDrive.setPower(power);
     }
 
+    public void stop(){
+        for (DcMotor motor : motors) {
+            motor.setZeroPowerBehavior(BRAKE);
+        }
+    }
 }

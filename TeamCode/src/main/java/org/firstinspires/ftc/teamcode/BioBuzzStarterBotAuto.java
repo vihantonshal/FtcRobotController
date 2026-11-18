@@ -76,8 +76,8 @@ public class BioBuzzStarterBotAuto extends OpMode
      * in the launch() function to only run the windmill servo when the motor is spinning fast
      * enough to make a successful throw.
      */
-    public final int LAUNCHER_TARGET_VELOCITY = 1150;
-    public final int LAUNCHER_MIN_VELOCITY = 1100;
+    public final int LAUNCHER_TARGET_VELOCITY = 1190;
+    public final int LAUNCHER_MIN_VELOCITY = 1130;
     MecanumDrive mecanumDrive = null;
 
     /*
@@ -364,10 +364,16 @@ public class BioBuzzStarterBotAuto extends OpMode
         distance = 65;
 
         mecanumDrive.driveDistance(direction, distance, speed);
+        //mecanumDrive.mecanumDrive(0,-40,0);
         telemetry.addData("Status", "Driving Left");
+        mecanumDrive.turnToHeading();     // straighten the nose
+        mecanumDrive.stop();
+
         direction = "BACK";
         distance = 130;
         mecanumDrive.driveDistance(direction, distance, speed);
+        //mecanumDrive.mecanumDrive(-50,0,0);
+
         telemetry.addData("Status", "Driving Forward");
 
 
