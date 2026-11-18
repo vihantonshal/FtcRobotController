@@ -70,7 +70,7 @@ public class LauncherSubsystem {
     // Feed only above (target - this). 50 = goBILDA's own StarterBot rule (target 1250, min 1200): with
     // PIDF (40, 0, 0, 12.5) the flywheel settles about 30-70 ticks/s short of the target, and 25 left the
     // roller waiting (teleop_log.csv, 2026-11-11).
-    public static double FEED_MARGIN = 50;
+    public static double FEED_MARGIN = 250; //For roller early spin
     public static double WINDMILL_POWER = 1.0;
     // The feed wheel (CR servo "feedWheel" beside the Runway lead-in) runs whenever the windmill does.
     // Seen from above it must turn clockwise so it pushes the ball toward the launcher: -1.0 if it turns the wrong way.
@@ -302,6 +302,7 @@ public class LauncherSubsystem {
     public void toggleOn() {
         if (enabled) {
             on = !on;
+
         }
     }
 
@@ -383,6 +384,7 @@ public class LauncherSubsystem {
                         cellRangeIn, isInShootingZone() ? "in zone"
                                 : String.format(Locale.US, "OUTSIDE the %.0f-%.0f in zone", ZONE_MIN_RANGE_IN, ZONE_MAX_RANGE_IN)),
                 trim);
+        telemetry.addData("Is Flywheel", on);
         if (on && "REVERSE".equals(getDirection())) {
             telemetry.addLine("WARNING: the flywheel spins BACKWARD");
         }

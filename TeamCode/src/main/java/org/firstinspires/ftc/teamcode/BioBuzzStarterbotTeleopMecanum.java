@@ -203,16 +203,15 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
          * Note, moving the joystick forward on most gamepads results in a negative signal, so
          * we invert it before passing it to the function.
          */
-        mecanumDrive(-gamepad1.left_stick_y, gamepad1.left_stick_x, gamepad1.right_stick_x);
+        mecanumDrive(-gamepad1.left_stick_y, -gamepad1.left_stick_x, gamepad1.right_stick_x);
 //if (gamepad2.aWasPressed() && launcher.getVelocity() == LAUNCHER_MIN_VELOCITY) {
 //    roller.setPower(1);
 //}else {
 //    roller.setPower(0);
 //}
 
-        if (gamepad2.aWasPressed() && launcherSubsystem.isOn()) {
-            launcherSubsystem.run(true);
-            }
+
+
         /*
          * Set the intake power variable to equal the right trigger, minus the left trigger.
          * Each trigger outputs a signal from 0-1, with 0 as fully released, and 1 fully depressed.
@@ -241,7 +240,15 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
             launcherSubsystem.adjustTrim(-1);
         }
 
+        if (gamepad2.aWasPressed() && launcherSubsystem.isOn()) {
+            launcherSubsystem.run(true);
+        }
+        else if(gamepad2.aWasReleased()) {
+            launcherSubsystem.spinUp(); //Spin up without feeding
+        }
+
         telemetry.addData("Feed (A)", launcherSubsystem.feedState(gamepad2.a));
+
         /*
          * Here we set our intake motor and servos to their intake power. The order of operations
          * here is important though. The gamepad triggers define the starting point for the intake
@@ -271,6 +278,10 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
      */
     @Override
     public void stop() {
+        if(launcherSubsystem != null) {
+            launcherSubsystem.stop();
+        }
+
     }
 
     void mecanumDrive(double forward, double strafe, double rotate) {
