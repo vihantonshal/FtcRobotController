@@ -19,11 +19,11 @@ import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
  */
 public class BioBuzzMecanumDrive {
 
-    // Rev Control Hub Orientation (Hub upright on LEFT side, USB pointing DOWN)
+    // Rev Control Hub Orientation (Hub upright on RIGHT side, USB pointing BACKWARD)
     public static final RevHubOrientationOnRobot.LogoFacingDirection HUB_LOGO =
-            RevHubOrientationOnRobot.LogoFacingDirection.LEFT;
+            RevHubOrientationOnRobot.LogoFacingDirection.RIGHT;
     public static final RevHubOrientationOnRobot.UsbFacingDirection HUB_USB =
-            RevHubOrientationOnRobot.UsbFacingDirection.DOWN;
+            RevHubOrientationOnRobot.UsbFacingDirection.BACKWARD;
 
     // Physical robot constants (GoBILDA 312 RPM motors + 104mm Mecanum wheels)
     public static final double COUNTS_PER_MOTOR_REV = 537.7;
