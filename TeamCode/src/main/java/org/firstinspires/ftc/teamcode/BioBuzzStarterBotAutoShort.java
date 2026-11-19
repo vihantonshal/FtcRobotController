@@ -62,9 +62,9 @@ import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
  * main robot "loop," continuously checking for conditions that allow us to move to the next step.
  */
 
-@Autonomous(name="BioBuzz StarterBot Auto", group="StarterBot")
+@Autonomous(name="BioBuzz StarterBot Auto Short", group="StarterBot")
 //@Disabled
-public class BioBuzzStarterBotAuto extends OpMode
+public class BioBuzzStarterBotAutoShort extends OpMode
 {
     /*
      * These two variables are used to control the velocity of the launcher motor.
@@ -129,7 +129,7 @@ public class BioBuzzStarterBotAuto extends OpMode
     /*
      * When we create the instance of our enum we can also assign a default state.
      */
-    private BioBuzzStarterBotAuto.Alliance alliance = BioBuzzStarterBotAuto.Alliance.RED;
+    private BioBuzzStarterBotAutoShort.Alliance alliance = BioBuzzStarterBotAutoShort.Alliance.RED;
 
     /*
      * TECH TIP: State Machines
@@ -363,8 +363,8 @@ public class BioBuzzStarterBotAuto extends OpMode
 //        rightDrive.setPower(speed);
 //TODO:: put mecanum
 
-        String direction = "LEFT";
-        distance = 50;
+        String direction = "RIGHT";
+        distance = 43;
 
         mecanumDrive.driveDistance(direction, distance, speed);
         //mecanumDrive.mecanumDrive(0,-40,0);
@@ -373,7 +373,7 @@ public class BioBuzzStarterBotAuto extends OpMode
         mecanumDrive.stop();
 
         direction = "BACK";
-        distance = 85;
+        distance = 10;
         mecanumDrive.driveDistance(direction, distance, speed);
         //mecanumDrive.mecanumDrive(-50,0,0);
 

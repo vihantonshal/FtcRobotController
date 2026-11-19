@@ -523,7 +523,22 @@ public class MecanumDrive {
         double minPower = Math.min(strafing ? STRAFE_MIN_POWER : MIN_POWER, maxPower);
         double trim = side > 0 ? RIGHT_FORWARD_TRIM : (side < 0 ? LEFT_FORWARD_TRIM : 0.0);
 
-        // FIX A: hold the ABSOLUTE heading (0 = square at INIT) and start the move square to it.
+        // ===== FIX A: absolute heading + pre-align (cures a CROOKED START) =====
+        // PROBLEM: a strafe is only straight if the robot starts square. If the robot begins
+        //   5 degrees off, a "straight" strafe goes 5 degrees off the line, and the error grows
+        //   with distance (65 in at 5 degrees ends about 5.7 in off target).
+        //   An earlier version saved the heading at the START of each move, which just copied
+        //   the crooked angle and held it crooked.
+        // FIX: hold the ABSOLUTE heading in holdHeading. 0 = the angle the robot had at INIT
+        //   (imu.resetYaw() in init()), so "straight" means "square to the field", not
+        //   "however the robot happened to be pointing when this move began".
+        //   If the robot is more than PRE_ALIGN_DEG away from it, turnToHeading() squares the
+        //   robot first, THEN the strafe starts.
+        //   CAUTION: turnDegrees() does not update holdHeading in this file. If you rotate on
+        //   purpose and then call driveDistance(), it turns the robot back to the old heading.
+        //   Fix: add "holdHeading = yawDeg();" at the end of turnDegrees(), or call
+        //   setHoldHeading(angle) after a deliberate turn.
+        // NOTE: the robot must be placed square BEFORE pressing INIT (it must not move after).
         final double hold = holdHeading;
         if (Math.abs(AngleUnit.normalizeDegrees(hold - yawDeg())) > PRE_ALIGN_DEG) {
             turnToHeading(hold);
@@ -562,13 +577,44 @@ public class MecanumDrive {
             double down = minPower + span * Math.min(1.0, remainingIn / RAMP_DOWN_IN);
             double p = Math.max(minPower, Math.min(up, down));
 
-            // FIX B: heading hold. error > 0 = yawed RIGHT of the held heading -> turn LEFT (negative).
+            // ===== FIX B: IMU heading hold (cures ROTATION while moving) =====
+            // PROBLEM: while strafing, uneven grip, weight and motor strength make one side of
+            //   the robot push harder, so the nose slowly rotates. The wheels then push along
+            //   the rotated direction, so the path bends into a diagonal. The old code had no
+            //   feedback, so nothing noticed or corrected the rotation.
+            // FIX: every loop (about every few ms) read the IMU yaw, compare it with the held
+            //   heading, and add a small turn command to cancel the difference (a P controller):
+            //       turn = -HEADING_KP * (hold - yaw)
+            //   Sign: yaw + = turned LEFT. error > 0 means the robot has yawed RIGHT of the
+            //   target, so the turn is negative = rotate LEFT, back to square.
+            //   The turn is clipped to MAX_HEADING_CORRECTION so it can never fight the strafe.
+            //   Tuning: raise HEADING_KP if the end heading error is large, lower it if the
+            //   robot wobbles left/right.
+            // LIMIT: yaw only tells which way the nose points, not where the robot is. A robot
+            //   can face perfectly straight and still slide forward/back. That is FIX C.
             headingError = AngleUnit.normalizeDegrees(hold - yawDeg());
             double turn = Math.max(-MAX_HEADING_CORRECTION,
                     Math.min(MAX_HEADING_CORRECTION, -HEADING_KP * headingError));
 
-            // FIX C: creep = the part of the motion that is NOT the move we asked for.
-            // Strafing: forward/back creep (+ = ahead). Driving: sideways creep (+ = right).
+            // ===== FIX C: cross-track creep correction (cures SIDEWAYS-TO-FORWARD SLIDE) =====
+            // PROBLEM: in a strafe, the roller forces in the forward/back direction should
+            //   cancel, but with mismatched grip, weight or motors they do not. The robot
+            //   creeps forward or back while facing straight (heading error about 0), so
+            //   FIX B cannot see it, yet the path is still diagonal.
+            // FIX: use the wheel encoders to measure the motion we did NOT ask for.
+            //   Mecanum kinematics split the four wheel readings into two parts:
+            //       fwdTicks  = (FL + FR + BL + BR) / 4   -> motion ahead/back
+            //       sideTicks = (FL - FR - BL + BR) / 4   -> motion left/right
+            //   While strafing, fwdTicks should stay 0; any value is creep (driftIn, inches,
+            //   + = ahead). While driving forward/back, sideTicks is the creep (+ = right).
+            //   Then push against it:  cross = -CROSS_KP * driftIn, clipped to MAX_CROSS.
+            //   The correction is added to the forward command when strafing (or the strafe
+            //   command when driving).
+            //   trim (LEFT_FORWARD_TRIM / RIGHT_FORWARD_TRIM) is a fixed bias that cancels the
+            //   robot's usual lean up front, so the loop only fixes what is left.
+            // LIMIT: encoders only see wheel rotation, not real floor slip, so this cuts the
+            //   creep but cannot remove all of it. If the robot still leans with heading error
+            //   about 0, tune the TRIM constants (or add odometry pods / a Pinpoint).
             driftIn = strafing ? fwdTicks / COUNTS_PER_INCH
                     : sideTicks / (COUNTS_PER_INCH * STRAFE_TICKS_FACTOR);
             double cross = Math.max(-MAX_CROSS, Math.min(MAX_CROSS, -CROSS_KP * driftIn));
