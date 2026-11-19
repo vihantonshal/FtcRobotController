@@ -1,7 +1,7 @@
 package org.firstinspires.ftc.teamcode;
 
 import com.qualcomm.robotcore.eventloop.opmode.*;
-
+@Disabled
 @TeleOp(name = "TeleOp2")
 public class TeleOp2 extends LinearOpMode {
 
