@@ -41,6 +41,27 @@ public class MecanumDrive {
     private double      FR_COMPENSATION=0.0;
     private double  BL_COMPENSATION=0.0;
     private double        BR_COMPENSATION=0.0;
+
+    // ---- driveDistance tuning (all need a field check) ----
+    // ---------- 2. Add inside MecanumDrive ----------
+    public static double STRAFE_MIN_POWER = 0.30;   // strafing needs more power than driving to move cleanly
+    public static double CROSS_KP = 0.03;           // creep correction: power per inch of creep
+    public static double MAX_CROSS = 0.15;
+    public static double PRE_ALIGN_DEG = 2.0;       // start each move square if off by more than this
+
+    public static double HEADING_KP = 0.02;            // turn power per degree of yaw error
+    public static double MAX_HEADING_CORRECTION = 0.25;
+    public static double MIN_POWER = 0.20;             // lowest power that still moves the robot on the tile
+    public static double RAMP_UP_IN = 4;               // inches to reach full speed
+    public static double RAMP_DOWN_IN = 8;             // inches over which it slows down at the end
+    // Strafing covers less ground per wheel tick than driving. Ask for 24 in, measure, set this to
+// 24 / measured (for example robot moved 17 in -> 1.41). 1.0 = same as driving.
+    public static double STRAFE_TICKS_FACTOR = 1.0;
+    // If a strafe also creeps forward/back, add a little forward power (fraction of the move power;
+// + = forward, - = back). 0 = none. Tune per side.
+    public static double LEFT_FORWARD_TRIM = 0.0;
+    public static double RIGHT_FORWARD_TRIM = 0.0;
+
     HardwareMap hardwareMap; Telemetry telemetry;
     //OctoQuad octoQuad;
 
@@ -311,14 +332,6 @@ public class MecanumDrive {
             (WHEEL_DIAMETER_INCHES * 3.1415);
 
 
-    // ---------- 2. Add inside MecanumDrive ----------
-    static final double STRAFE_CORRECTION = 1.1;    // sideways slips: tune with a tape measure
-    static final double START_POWER = 0.2, RAMP_UP_PER_INCH = 0.1;
-    static final double MIN_POWER = 0.15, SLOW_DOWN_PER_INCH = 0.08;
-    static final double HEADING_GAIN = 0.02, MAX_CORRECTION = 0.25;    // yaw hold
-    static final double CROSS_GAIN = 0.05, MAX_CROSS = 0.20;           // encoder drift fix. 0 if you use the trims
-    static final double LEFT_FORWARD_TRIM = 0.0, RIGHT_FORWARD_TRIM = 0.0;  // forward ended -> negative
-    static final double LEFT_CRAB_DEG = 0.0, RIGHT_CRAB_DEG = 0.0;     // use trims OR crab, not both
 
     private double holdHeading = 0;                 // "straight", in degrees
     // A LinearOpMode can set this to this::opModeIsActive. The default (always true) is safe: the timeout still stops moves.
@@ -476,32 +489,56 @@ public class MecanumDrive {
 //    }
 
     // ---------- 3. driveDistance with this ----------
+    /**
+     * Drives straight (or strafes) and keeps the robot square. Blocking.
+     * @param direction "FORWARD", "BACK", "LEFT", "RIGHT" or "" (= FORWARD). null counts as "".
+     * @param inches    distance. NEGATIVE reverses the direction ("LEFT", -26 = right 26).
+     * @param speed     0-1 top power (ramps up from a minimum and slows near the end)
+     */
     public void driveDistance(String direction, double inches, double speed) {
-        double fwdDir = 0, sideDir = 0;                 // same meaning as TeleOp: strafe + = RIGHT
-        if      (direction.equalsIgnoreCase("FORWARD")) fwdDir  =  1;
-        else if (direction.equalsIgnoreCase("BACK"))    fwdDir  = -1;
-        else if (direction.equalsIgnoreCase("RIGHT"))   sideDir =  1;
-        else if (direction.equalsIgnoreCase("LEFT"))    sideDir = -1;
-        else { telemetry.addData("ERROR", "Unknown direction: " + direction); telemetry.update(); return; }
+        String dir = (direction == null) ? "" : direction.trim();
+        double fwd = 0, side = 0;                       // side + = RIGHT
+        if (dir.isEmpty() || dir.equalsIgnoreCase("FORWARD")) fwd = 1;
+        else if (dir.equalsIgnoreCase("BACK"))                fwd = -1;
+        else if (dir.equalsIgnoreCase("RIGHT"))               side = 1;
+        else if (dir.equalsIgnoreCase("LEFT"))                side = -1;
+        else {
+            telemetry.addData("driveDistance ERROR", "Unknown direction: " + direction);
+            telemetry.update();
+            return;
+        }
+        if (inches < 0) {                               // negative distance = the opposite way
+            fwd = -fwd;
+            side = -side;
+            inches = -inches;
+        }
+        double maxPower = Math.min(1.0, Math.abs(speed));
+        if (inches == 0 || maxPower == 0) {
+            return;
+        }
 
-        boolean strafing = sideDir != 0;
-        double ticksPerInch = COUNTS_PER_INCH * (strafing ? STRAFE_CORRECTION : 1.0);
-        double targetTicks  = inches * ticksPerInch;
+        boolean strafing = side != 0;
+        double ticksPerInch = COUNTS_PER_INCH * (strafing ? STRAFE_TICKS_FACTOR : 1.0);
+        double targetTicks = inches * ticksPerInch;
+        double minPower = Math.min(strafing ? STRAFE_MIN_POWER : MIN_POWER, maxPower);
+        double trim = side > 0 ? RIGHT_FORWARD_TRIM : (side < 0 ? LEFT_FORWARD_TRIM : 0.0);
 
-        double trim = 0, crab = 0;
-        if (direction.equalsIgnoreCase("LEFT"))       { trim = LEFT_FORWARD_TRIM;  crab = LEFT_CRAB_DEG; }
-        else if (direction.equalsIgnoreCase("RIGHT")) { trim = RIGHT_FORWARD_TRIM; crab = RIGHT_CRAB_DEG; }
-        double aim = holdHeading + crab;
-        if (crab != 0) turnToHeading(aim);
+        // FIX A: hold the ABSOLUTE heading (0 = square at INIT) and start the move square to it.
+        final double hold = holdHeading;
+        if (Math.abs(AngleUnit.normalizeDegrees(hold - yawDeg())) > PRE_ALIGN_DEG) {
+            turnToHeading(hold);
+        }
 
-        int flStart = frontLeftDrive.getCurrentPosition();
-        int frStart = frontRightDrive.getCurrentPosition();
-        int blStart = backLeftDrive.getCurrentPosition();
-        int brStart = backRightDrive.getCurrentPosition();
+        // Encoder starts are read AFTER the pre-align turn.
+        final int flStart = frontLeftDrive.getCurrentPosition();
+        final int frStart = frontRightDrive.getCurrentPosition();
+        final int blStart = backLeftDrive.getCurrentPosition();
+        final int brStart = backRightDrive.getCurrentPosition();
 
         setMode(DcMotor.RunMode.RUN_USING_ENCODER);
         ElapsedTime timer = new ElapsedTime();
-        double timeout = 2 + inches * 0.25;
+        final double timeout = 1.5 + 0.15 * inches / Math.max(maxPower, 0.2);
+        double traveledIn = 0, headingError = 0, driftIn = 0;
 
         while (isActive.getAsBoolean() && timer.seconds() < timeout) {
             int dFL = frontLeftDrive.getCurrentPosition()  - flStart;
@@ -509,38 +546,73 @@ public class MecanumDrive {
             int dBL = backLeftDrive.getCurrentPosition()   - blStart;
             int dBR = backRightDrive.getCurrentPosition()  - brStart;
 
-            double fwdTicks  = (dFL + dFR + dBL + dBR) / 4.0;     // + = moved ahead
-            double sideTicks = (dFL - dFR - dBL + dBR) / 4.0;     // + = moved right
-            double traveledTicks = fwdDir * fwdTicks + sideDir * sideTicks;
-            if (traveledTicks >= targetTicks) break;
+            double fwdTicks  = (dFL + dFR + dBL + dBR) / 4.0;    // + = moved ahead
+            double sideTicks = (dFL - dFR - dBL + dBR) / 4.0;    // + = moved right
+            double traveledTicks = fwd * fwdTicks + side * sideTicks;
+            if (traveledTicks >= targetTicks) {
+                break;
+            }
 
-            double traveledIn  = traveledTicks / ticksPerInch;
-            double remainingIn = inches - traveledIn;
-            double p = Math.min(Math.abs(speed), START_POWER + traveledIn * RAMP_UP_PER_INCH);
-            p = Math.min(p, MIN_POWER + remainingIn * SLOW_DOWN_PER_INCH);
+            traveledIn = Math.max(0.0, traveledTicks / ticksPerInch);   // never negative
+            double remainingIn = inches - traveledIn;                    // always > 0 here
 
-            // The "driver's right stick": steer to keep the nose on `aim`
-            double error = AngleUnit.normalizeDegrees(aim - getYaw());
-            double turn  = clip(-HEADING_GAIN * error, -MAX_CORRECTION, MAX_CORRECTION);   // + = clockwise
+            // Ramp up from minPower, ramp down to minPower, never below it or above maxPower.
+            double span = maxPower - minPower;
+            double up   = minPower + span * Math.min(1.0, traveledIn / RAMP_UP_IN);
+            double down = minPower + span * Math.min(1.0, remainingIn / RAMP_DOWN_IN);
+            double p = Math.max(minPower, Math.min(up, down));
 
-            // The "driver's eyes": push back if the robot slides off the line
-            double driftIn = strafing ? fwdTicks / COUNTS_PER_INCH
-                    : sideTicks / (COUNTS_PER_INCH * STRAFE_CORRECTION);
-            double c = clip(-CROSS_GAIN * driftIn, -MAX_CROSS, MAX_CROSS);
+            // FIX B: heading hold. error > 0 = yawed RIGHT of the held heading -> turn LEFT (negative).
+            headingError = AngleUnit.normalizeDegrees(hold - yawDeg());
+            double turn = Math.max(-MAX_HEADING_CORRECTION,
+                    Math.min(MAX_HEADING_CORRECTION, -HEADING_KP * headingError));
 
-            double f = fwdDir  * p + (strafing ? c + trim * p : 0);
-            double s = sideDir * p + (strafing ? 0 : c);
-            setMecanum(f, s, turn);
+            // FIX C: creep = the part of the motion that is NOT the move we asked for.
+            // Strafing: forward/back creep (+ = ahead). Driving: sideways creep (+ = right).
+            driftIn = strafing ? fwdTicks / COUNTS_PER_INCH
+                    : sideTicks / (COUNTS_PER_INCH * STRAFE_TICKS_FACTOR);
+            double cross = Math.max(-MAX_CROSS, Math.min(MAX_CROSS, -CROSS_KP * driftIn));
 
-            telemetry.addData("Move", "%s %.0f in", direction, inches);
+            double f = fwd * p + (strafing ? trim * p + cross : 0.0);
+            double s = side * p + (strafing ? 0.0 : cross);
+            setWheelsLinear(f, s, turn);
+
+            telemetry.addData("Move", "%s %.1f in at %.2f", dir.isEmpty() ? "FORWARD" : dir, inches, p);
             telemetry.addData("Traveled", "%.1f in", traveledIn);
-            telemetry.addData("Heading error", "%.1f deg (steering %.2f)", error, turn);
-            telemetry.addData("Drift", "%.1f in", driftIn);
+            telemetry.addData("Heading hold", "%.1f° (error %.1f°, turn %.2f)", hold, headingError, turn);
+            telemetry.addData("Creep", "%.1f in (correction %.2f)", driftIn, cross);
             telemetry.update();
         }
 
         setPower(0);
-        if (crab != 0) turnToHeading(holdHeading);
+        setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        telemetry.addData("driveDistance done", "%.1f of %.1f in, heading error %.1f°, creep %.1f in%s",
+                traveledIn, inches, headingError, driftIn, timer.seconds() >= timeout ? "  TIMEOUT" : "");
+        telemetry.update();
+
+        if (fwd != 0) {
+            robotPose.x += fwd * traveledIn * Math.sin(robotPose.heading);
+            robotPose.y += fwd * traveledIn * Math.cos(robotPose.heading);
+        }
+    }
+
+
+    private double yawDeg() {
+        return imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.DEGREES);   // + = turned LEFT
+    }
+
+    // Plain linear mecanum mix (+ turnRight = clockwise), NOT the cubic curve that drive() applies.
+    private void setWheelsLinear(double forward, double strafe, double turnRight) {
+        double fl = forward + strafe + turnRight;
+        double fr = forward - strafe - turnRight;
+        double bl = forward - strafe + turnRight;
+        double br = forward + strafe - turnRight;
+        double max = Math.max(1.0, Math.max(Math.max(Math.abs(fl), Math.abs(fr)),
+                Math.max(Math.abs(bl), Math.abs(br))));
+        frontLeftDrive.setPower(fl / max);
+        frontRightDrive.setPower(fr / max);
+        backLeftDrive.setPower(bl / max);
+        backRightDrive.setPower(br / max);
     }
 
     // NEW: paste it here
