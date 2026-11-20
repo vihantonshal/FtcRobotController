@@ -364,7 +364,7 @@ public class BioBuzzStarterBotAutoLong extends OpMode
 //TODO:: put mecanum
 
         String direction = "LEFT";
-        distance = 50;
+        distance = 46;
 
         mecanumDrive.driveDistance(direction, distance, speed);
         //mecanumDrive.mecanumDrive(0,-40,0);
@@ -373,7 +373,7 @@ public class BioBuzzStarterBotAutoLong extends OpMode
         mecanumDrive.stop();
 
         direction = "BACK";
-        distance = 85;
+        distance = 82;
         mecanumDrive.driveDistance(direction, distance, speed);
         //mecanumDrive.mecanumDrive(-50,0,0);
 
